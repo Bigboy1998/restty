@@ -1,5 +1,16 @@
 import type { InputHandler } from "../input";
+import type { WebGPUCoreState } from "../renderer";
 import type { GhosttyTheme } from "../theme";
+import type { ResttyWasm } from "../wasm";
+
+export type ResttyWasmLogListener = (message: string) => void;
+
+export type ResttyAppSession = {
+  getWasm: () => Promise<ResttyWasm>;
+  getWebGPUCore: (canvas: HTMLCanvasElement) => Promise<WebGPUCoreState | null>;
+  addWasmLogListener?: (listener: ResttyWasmLogListener) => void;
+  removeWasmLogListener?: (listener: ResttyWasmLogListener) => void;
+};
 
 export type ResttyAppElements = {
   backendEl?: HTMLElement | null;
@@ -45,6 +56,7 @@ export type FontSource = {
 
 export type ResttyAppOptions = {
   canvas: HTMLCanvasElement;
+  session?: ResttyAppSession;
   imeInput?: HTMLTextAreaElement | null;
   elements?: ResttyAppElements;
   callbacks?: ResttyAppCallbacks;

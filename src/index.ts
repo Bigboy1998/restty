@@ -7,6 +7,7 @@ export {
   type RectData,
   type GlyphBox,
   type NerdMetrics,
+  type WebGPUCoreState,
   type WebGPUState,
   type WebGLState,
   type WebGLAtlasState,
@@ -46,6 +47,7 @@ export {
   drawPowerline,
   constrainGlyphBox,
   // WebGPU
+  initWebGPUCore,
   initWebGPU,
   initWebGL,
   ensureInstanceBuffer,
@@ -191,5 +193,12 @@ export {
 export type { GhosttyTheme, ThemeColor, ResttyBuiltinThemeName } from "./theme";
 
 // App / high-level integration
-export { createResttyApp } from "./app";
-export type { ResttyApp, ResttyAppOptions, ResttyAppElements, ResttyAppCallbacks } from "./app";
+export { createResttyApp, createResttyAppSession, getDefaultResttyAppSession } from "./app";
+export type {
+  ResttyWasmLogListener,
+  ResttyAppSession,
+  ResttyApp,
+  ResttyAppOptions,
+  ResttyAppElements,
+  ResttyAppCallbacks,
+} from "./app";

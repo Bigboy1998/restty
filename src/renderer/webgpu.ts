@@ -1,5 +1,5 @@
 /// <reference types="@webgpu/types" />
-import type { WebGPUState, WebGLState } from "./types";
+import type { WebGPUCoreState, WebGPUState, WebGLState } from "./types";
 import {
   RECT_SHADER,
   GLYPH_SHADER,
@@ -10,16 +10,10 @@ import {
   GLYPH_SHADER_GL_FRAG,
 } from "./shaders";
 
-export async function initWebGPU(canvas: HTMLCanvasElement): Promise<WebGPUState | null> {
-  if (!navigator.gpu) return null;
-
-  const adapter = await navigator.gpu.requestAdapter();
-  if (!adapter) return null;
-
-  const device = await adapter.requestDevice();
-  const context = canvas.getContext("webgpu");
-  if (!context) return null;
-
+function getPreferredAndSrgbFormats(): {
+  preferredFormat: GPUTextureFormat;
+  srgbFormat: GPUTextureFormat;
+} {
   const preferredFormat = navigator.gpu.getPreferredCanvasFormat();
   const srgbFormat =
     preferredFormat === "bgra8unorm"
@@ -27,6 +21,15 @@ export async function initWebGPU(canvas: HTMLCanvasElement): Promise<WebGPUState
       : preferredFormat === "rgba8unorm"
         ? "rgba8unorm-srgb"
         : preferredFormat;
+  return { preferredFormat, srgbFormat };
+}
+
+function configureContextFormat(
+  context: GPUCanvasContext,
+  device: GPUDevice,
+  preferredFormat: GPUTextureFormat,
+  srgbFormat: GPUTextureFormat,
+): { format: GPUTextureFormat; srgbSwapchain: boolean } {
   let format = preferredFormat;
   try {
     context.configure({ device, format: srgbFormat, alphaMode: "opaque" });
@@ -34,8 +37,14 @@ export async function initWebGPU(canvas: HTMLCanvasElement): Promise<WebGPUState
   } catch {
     context.configure({ device, format: preferredFormat, alphaMode: "opaque" });
   }
-  const srgbSwapchain = format.endsWith("-srgb");
+  return { format, srgbSwapchain: format.endsWith("-srgb") };
+}
 
+function createWebGPUCoreState(
+  device: GPUDevice,
+  format: GPUTextureFormat,
+  srgbSwapchain: boolean,
+): WebGPUCoreState {
   // Quad vertices for instanced rendering
   const quadVertices = new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]);
   const vertexBuffer = device.createBuffer({
@@ -45,12 +54,6 @@ export async function initWebGPU(canvas: HTMLCanvasElement): Promise<WebGPUState
   });
   new Float32Array(vertexBuffer.getMappedRange()).set(quadVertices);
   vertexBuffer.unmap();
-
-  // Uniform buffer for resolution and blending flags
-  const uniformBuffer = device.createBuffer({
-    size: 8 * 4,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
 
   // Shader modules
   const rectModule = device.createShaderModule({ code: RECT_SHADER });
@@ -204,29 +207,78 @@ export async function initWebGPU(canvas: HTMLCanvasElement): Promise<WebGPUState
     primitive: { topology: "triangle-list", cullMode: "none" },
   });
 
-  // Rect bind group
-  const rectBindGroup = device.createBindGroup({
-    layout: rectPipeline.getBindGroupLayout(0),
-    entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
-  });
-
   return {
     device,
-    context,
     format,
     srgbSwapchain,
     rectPipeline,
     glyphPipeline,
     glyphPipelineNearest,
+    vertexBuffer,
+  };
+}
+
+export async function initWebGPUCore(canvas: HTMLCanvasElement): Promise<WebGPUCoreState | null> {
+  if (!navigator.gpu) return null;
+
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) return null;
+
+  const device = await adapter.requestDevice();
+  const context = canvas.getContext("webgpu");
+  if (!context) return null;
+
+  const { preferredFormat, srgbFormat } = getPreferredAndSrgbFormats();
+  const { format, srgbSwapchain } = configureContextFormat(context, device, preferredFormat, srgbFormat);
+
+  return createWebGPUCoreState(device, format, srgbSwapchain);
+}
+
+export async function initWebGPU(
+  canvas: HTMLCanvasElement,
+  options: { core?: WebGPUCoreState | null } = {},
+): Promise<WebGPUState | null> {
+  const core = options.core ?? (await initWebGPUCore(canvas));
+  if (!core) return null;
+  const context = canvas.getContext("webgpu");
+  if (!context) return null;
+
+  try {
+    context.configure({ device: core.device, format: core.format, alphaMode: "opaque" });
+  } catch {
+    return null;
+  }
+
+  // Uniform buffer for resolution and blending flags
+  const uniformBuffer = core.device.createBuffer({
+    size: 8 * 4,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  // Rect bind group
+  const rectBindGroup = core.device.createBindGroup({
+    layout: core.rectPipeline.getBindGroupLayout(0),
+    entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
+  });
+
+  return {
+    core,
+    device: core.device,
+    context,
+    format: core.format,
+    srgbSwapchain: core.srgbSwapchain,
+    rectPipeline: core.rectPipeline,
+    glyphPipeline: core.glyphPipeline,
+    glyphPipelineNearest: core.glyphPipelineNearest,
     rectBindGroup,
     uniformBuffer,
-    vertexBuffer,
-    rectInstanceBuffer: device.createBuffer({
+    vertexBuffer: core.vertexBuffer,
+    rectInstanceBuffer: core.device.createBuffer({
       size: 4,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     }),
     rectCapacity: 4,
-    glyphInstanceBuffer: device.createBuffer({
+    glyphInstanceBuffer: core.device.createBuffer({
       size: 4,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     }),

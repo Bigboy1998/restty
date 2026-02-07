@@ -2,6 +2,22 @@
   "name": "restty",
   "version": "0.1.5",
   "description": "Browser terminal rendering library powered by WASM, WebGPU/WebGL2, and TypeScript text shaping.",
+  "keywords": [
+    "terminal",
+    "terminal-emulator",
+    "tty",
+    "ansi",
+    "vt",
+    "ghostty",
+    "webgpu",
+    "webgl2",
+    "wasm",
+    "text-shaper",
+    "text-shaping",
+    "unicode",
+    "font-shaping",
+    "typescript"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/wiedymi/restty"

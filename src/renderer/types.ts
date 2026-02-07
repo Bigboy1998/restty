@@ -2,6 +2,7 @@
 import type { Color } from "./shapes";
 
 export type WebGPUState = {
+  core: WebGPUCoreState;
   device: GPUDevice;
   context: GPUCanvasContext;
   format: GPUTextureFormat;
@@ -9,14 +10,24 @@ export type WebGPUState = {
   rectPipeline: GPURenderPipeline;
   glyphPipeline: GPURenderPipeline;
   glyphPipelineNearest: GPURenderPipeline;
+  vertexBuffer: GPUBuffer;
   rectBindGroup: GPUBindGroup;
   uniformBuffer: GPUBuffer;
-  vertexBuffer: GPUBuffer;
   rectInstanceBuffer: GPUBuffer;
   rectCapacity: number;
   glyphInstanceBuffer: GPUBuffer;
   glyphCapacity: number;
   glyphAtlases: Map<number, AtlasState>;
+};
+
+export type WebGPUCoreState = {
+  device: GPUDevice;
+  format: GPUTextureFormat;
+  srgbSwapchain: boolean;
+  rectPipeline: GPURenderPipeline;
+  glyphPipeline: GPURenderPipeline;
+  glyphPipelineNearest: GPURenderPipeline;
+  vertexBuffer: GPUBuffer;
 };
 
 export type AtlasState = {

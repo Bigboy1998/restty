@@ -14,13 +14,12 @@ import {
   type FontEntry,
   type FontManagerState,
 } from "../fonts";
-import {
-  loadResttyWasm,
+import type {
   ResttyWasm,
-  type RenderState,
-  type CursorInfo,
-  type KittyPlacement,
-  type ResttyWasmExports,
+  RenderState,
+  CursorInfo,
+  KittyPlacement,
+  ResttyWasmExports,
 } from "../wasm";
 import {
   createPtyConnection,
@@ -63,16 +62,21 @@ import {
 } from "./atlas-builder";
 import * as bundledTextShaper from "text-shaper";
 import type { ResttyApp, ResttyAppOptions } from "./types";
+import { getDefaultResttyAppSession } from "./session";
+export { createResttyAppSession, getDefaultResttyAppSession } from "./session";
 export type {
   ResttyAppElements,
   ResttyAppCallbacks,
   FontSource,
+  ResttyWasmLogListener,
+  ResttyAppSession,
   ResttyAppOptions,
   ResttyApp,
 } from "./types";
 
 export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   const { canvas: canvasInput, imeInput: imeInputInput, elements, callbacks } = options;
+  const session = options.session ?? getDefaultResttyAppSession();
   const textShaper = bundledTextShaper;
   if (!canvasInput) {
     throw new Error("createResttyApp requires a canvas element");
@@ -5807,15 +5811,19 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     rafId = requestAnimationFrame(() => loop(state));
   }
 
+  const onWasmLog = (text: string) => {
+    if (shouldSuppressWasmLog(text)) return;
+    console.log(`[wasm] ${text}`);
+    appendLog(`[wasm] ${text}`);
+  };
+  if (session.addWasmLogListener) {
+    session.addWasmLogListener(onWasmLog);
+    cleanupFns.push(() => session.removeWasmLogListener?.(onWasmLog));
+  }
+
   async function initWasm() {
     if (wasmReady && wasm) return wasm;
-    const instance = await loadResttyWasm({
-      log: (text) => {
-        if (shouldSuppressWasmLog(text)) return;
-        console.log(`[wasm] ${text}`);
-        appendLog(`[wasm] ${text}`);
-      },
-    });
+    const instance = await session.getWasm();
     wasm = instance;
     wasmExports = instance.exports;
     wasmReady = true;
@@ -5927,6 +5935,12 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   }
 
   if (attachWindowEvents) {
+    const hasInputFocus = () => {
+      if (typeof document === "undefined") return true;
+      const active = document.activeElement;
+      return active === canvas || (imeInput ? active === imeInput : false);
+    };
+
     const shouldSkipKeyEvent = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (
@@ -5957,7 +5971,8 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (shouldSkipKeyEvent(event)) return;
-      if (!isFocused) isFocused = true;
+      if (!hasInputFocus()) return;
+      isFocused = true;
       if (!wasmReady || !wasmHandle) return;
 
       const key = event.key?.toLowerCase?.() ?? "";
@@ -5991,7 +6006,8 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
       if (!wasm || !wasmHandle) return;
       if ((wasm.getKittyKeyboardFlags(wasmHandle) & KITTY_FLAG_REPORT_EVENTS) === 0) return;
       if (shouldSkipKeyEvent(event)) return;
-      if (!isFocused) isFocused = true;
+      if (!hasInputFocus()) return;
+      isFocused = true;
       if (!wasmReady || !wasmHandle) return;
 
       const seq = inputHandler.encodeKeyEvent(event);
@@ -6055,7 +6071,8 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
       if (currentContextType === "webgl2") {
         replaceCanvas();
       }
-      const gpuState = await initWebGPU(canvas);
+      const gpuCore = await session.getWebGPUCore(canvas);
+      const gpuState = gpuCore ? await initWebGPU(canvas, { core: gpuCore }) : null;
       if (gpuState) {
         backend = "webgpu";
         currentContextType = "webgpu";
