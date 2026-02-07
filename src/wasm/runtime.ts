@@ -1,0 +1,602 @@
+import { WASM_BASE64 } from "./embedded";
+
+export type WasmAbiKind = "info" | "render" | "cells";
+
+export type WasmAbi = {
+  kind: WasmAbiKind;
+};
+
+export type CursorInfo = {
+  row: number;
+  col: number;
+  visible: number;
+  style: number;
+  blinking: number;
+  wideTail: number;
+  color: number;
+};
+
+export type KittyPlacement = {
+  imageId: number;
+  imageFormat: number;
+  imageWidth: number;
+  imageHeight: number;
+  imageDataPtr: number;
+  imageDataLen: number;
+  x: number;
+  y: number;
+  z: number;
+  width: number;
+  height: number;
+  cellOffsetX: number;
+  cellOffsetY: number;
+  sourceX: number;
+  sourceY: number;
+  sourceWidth: number;
+  sourceHeight: number;
+};
+
+export type RenderState = {
+  rows: number;
+  cols: number;
+  cellCount: number;
+  codepoints: Uint32Array | null;
+  contentTags: Uint8Array | null;
+  wide: Uint8Array | null;
+  cellFlags: Uint16Array | null;
+  styleFlags: Uint16Array | null;
+  linkIds: Uint32Array | null;
+  fgBytes: Uint8Array | null;
+  bgBytes: Uint8Array | null;
+  ulBytes: Uint8Array | null;
+  ulStyle: Uint8Array | null;
+  linkOffsets: Uint32Array | null;
+  linkLengths: Uint32Array | null;
+  linkBuffer: Uint8Array | null;
+  graphemeOffset: Uint32Array | null;
+  graphemeLen: Uint32Array | null;
+  graphemeBuffer: Uint32Array | null;
+  selectionStart: Int16Array | null;
+  selectionEnd: Int16Array | null;
+  cursor: CursorInfo | null;
+};
+
+export type WtermWasmExports = WebAssembly.Exports & {
+  memory: WebAssembly.Memory;
+  wterm_create: (cols: number, rows: number, maxScrollback: number) => number;
+  wterm_destroy: (handle: number) => void;
+  wterm_write: (handle: number, ptr: number, len: number) => void;
+  wterm_resize: (handle: number, cols: number, rows: number) => void;
+  wterm_set_pixel_size?: (handle: number, widthPx: number, heightPx: number) => number;
+  wterm_render_update: (handle: number) => void;
+  wterm_alloc: (len: number) => number;
+  wterm_free: (ptr: number, len: number) => void;
+  wterm_set_default_colors?: (handle: number, fg: number, bg: number, cursor: number) => number;
+  wterm_set_palette?: (handle: number, ptr: number, len: number) => number;
+  wterm_reset_palette?: (handle: number) => number;
+  wterm_scroll_viewport?: (handle: number, delta: number) => number;
+  wterm_scrollbar_total?: (handle: number) => number;
+  wterm_scrollbar_offset?: (handle: number) => number;
+  wterm_scrollbar_len?: (handle: number) => number;
+  wterm_render_info?: (handle: number) => number;
+  wterm_render_rows?: (handle: number) => number;
+  wterm_render_cols?: (handle: number) => number;
+  wterm_render_codepoints_ptr?: (handle: number) => number;
+  wterm_render_fg_rgba_ptr?: (handle: number) => number;
+  wterm_render_bg_rgba_ptr?: (handle: number) => number;
+  wterm_render_ul_rgba_ptr?: (handle: number) => number;
+  wterm_render_ul_style_ptr?: (handle: number) => number;
+  wterm_render_grapheme_offset_ptr?: (handle: number) => number;
+  wterm_render_grapheme_len_ptr?: (handle: number) => number;
+  wterm_render_grapheme_buffer_ptr?: (handle: number) => number;
+  wterm_render_grapheme_buffer_len?: (handle: number) => number;
+  wterm_render_selection_start_ptr?: (handle: number) => number;
+  wterm_render_selection_end_ptr?: (handle: number) => number;
+  wterm_render_cursor_ptr?: (handle: number) => number;
+  wterm_rows?: (handle: number) => number;
+  wterm_cols?: (handle: number) => number;
+  wterm_cell_codepoints_ptr?: (handle: number) => number;
+  wterm_cell_content_tags_ptr?: (handle: number) => number;
+  wterm_cell_wide_ptr?: (handle: number) => number;
+  wterm_cell_flags_ptr?: (handle: number) => number;
+  wterm_cell_style_flags_ptr?: (handle: number) => number;
+  wterm_cell_link_ids_ptr?: (handle: number) => number;
+  wterm_cell_fg_rgba_ptr?: (handle: number) => number;
+  wterm_cell_bg_rgba_ptr?: (handle: number) => number;
+  wterm_cell_ul_rgba_ptr?: (handle: number) => number;
+  wterm_cell_underline_styles_ptr?: (handle: number) => number;
+  wterm_cell_grapheme_offsets_ptr?: (handle: number) => number;
+  wterm_cell_grapheme_lengths_ptr?: (handle: number) => number;
+  wterm_grapheme_buffer_ptr?: (handle: number) => number;
+  wterm_grapheme_buffer_len?: (handle: number) => number;
+  wterm_row_selection_start_ptr?: (handle: number) => number;
+  wterm_row_selection_end_ptr?: (handle: number) => number;
+  wterm_cursor_info_ptr?: (handle: number) => number;
+  wterm_link_offsets_ptr?: (handle: number) => number;
+  wterm_link_lengths_ptr?: (handle: number) => number;
+  wterm_link_buffer_ptr?: (handle: number) => number;
+  wterm_link_count?: (handle: number) => number;
+  wterm_link_buffer_len?: (handle: number) => number;
+  wterm_debug_cursor_x?: (handle: number) => number;
+  wterm_debug_cursor_y?: (handle: number) => number;
+  wterm_debug_scroll_left?: (handle: number) => number;
+  wterm_debug_scroll_right?: (handle: number) => number;
+  wterm_debug_term_cols?: (handle: number) => number;
+  wterm_debug_term_rows?: (handle: number) => number;
+  wterm_debug_page_cols?: (handle: number) => number;
+  wterm_debug_page_rows?: (handle: number) => number;
+  wterm_output_ptr?: (handle: number) => number;
+  wterm_output_len?: (handle: number) => number;
+  wterm_output_consume?: (handle: number, len: number) => number;
+  wterm_kitty_keyboard_flags?: (handle: number) => number;
+  wterm_kitty_placement_stride?: () => number;
+  wterm_kitty_placement_count?: (handle: number) => number;
+  wterm_kitty_placements_ptr?: (handle: number) => number;
+};
+
+export type WtermWasmOptions = {
+  log?: (message: string) => void;
+};
+
+type RenderPtrs = {
+  rows: number;
+  cols: number;
+  codepointsPtr: number;
+  contentTagsPtr: number;
+  widePtr: number;
+  flagsPtr: number;
+  styleFlagsPtr: number;
+  linkIdsPtr: number;
+  fgPtr: number;
+  bgPtr: number;
+  ulPtr: number;
+  ulStylePtr: number;
+  graphemeOffsetPtr: number;
+  graphemeLenPtr: number;
+  graphemeBufferPtr: number;
+  graphemeBufferLen: number;
+  selectionStartPtr: number;
+  selectionEndPtr: number;
+  cursorPtr: number;
+};
+
+const textDecoder = new TextDecoder();
+const textEncoder = new TextEncoder();
+
+function decodeBase64(base64: string): Uint8Array {
+  const cleaned = base64.replace(/\s+/g, "");
+  if (typeof atob === "function") {
+    const binary = atob(cleaned);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i) & 0xff;
+    }
+    return bytes;
+  }
+  if (typeof Buffer !== "undefined") {
+    return new Uint8Array(Buffer.from(cleaned, "base64"));
+  }
+  throw new Error("No base64 decoder available in this environment.");
+}
+
+function resolveWasmAbi(exports: WtermWasmExports): WasmAbi | null {
+  if (exports.wterm_render_info) {
+    return { kind: "info" };
+  }
+  if (exports.wterm_render_codepoints_ptr) {
+    return { kind: "render" };
+  }
+  if (exports.wterm_cell_codepoints_ptr) {
+    return { kind: "cells" };
+  }
+  return null;
+}
+
+function ptrFromOffset(base: number, offset: number, memSize: number): number {
+  if (!offset) return 0;
+  const absolute = base + offset;
+  if (absolute > 0 && absolute < memSize) return absolute;
+  if (offset > 0 && offset < memSize) return offset;
+  return 0;
+}
+
+function unpackCursor(bytes: Uint8Array, ptr: number): CursorInfo | null {
+  if (!ptr) return null;
+  const view = new DataView(bytes.buffer, ptr, 16);
+  return {
+    row: view.getUint16(0, true),
+    col: view.getUint16(2, true),
+    visible: view.getUint8(4),
+    style: view.getUint8(5),
+    blinking: view.getUint8(6),
+    wideTail: view.getUint8(7),
+    color: view.getUint32(8, true),
+  };
+}
+
+function readRenderInfo(exports: WtermWasmExports, handle: number): RenderPtrs | null {
+  if (!exports.wterm_render_info) return null;
+  const base = exports.wterm_render_info(handle);
+  if (!base) return null;
+  const mem = exports.memory;
+  const view = new DataView(mem.buffer, base, 64);
+  const version = view.getUint32(0, true);
+  if (version !== 1) {
+    return null;
+  }
+  const rows = view.getUint16(4, true);
+  const cols = view.getUint16(6, true);
+  const memSize = mem.buffer.byteLength;
+  const codepointsPtr = ptrFromOffset(base, view.getUint32(8, true), memSize);
+  const fgPtr = ptrFromOffset(base, view.getUint32(12, true), memSize);
+  const bgPtr = ptrFromOffset(base, view.getUint32(16, true), memSize);
+  const ulPtr = ptrFromOffset(base, view.getUint32(20, true), memSize);
+  const ulStylePtr = ptrFromOffset(base, view.getUint32(24, true), memSize);
+  const graphemeOffsetPtr = ptrFromOffset(base, view.getUint32(28, true), memSize);
+  const graphemeLenPtr = ptrFromOffset(base, view.getUint32(32, true), memSize);
+  const graphemeBufferPtr = ptrFromOffset(base, view.getUint32(36, true), memSize);
+  const graphemeBufferLen = view.getUint32(40, true);
+  const selectionStartPtr = ptrFromOffset(base, view.getUint32(44, true), memSize);
+  const selectionEndPtr = ptrFromOffset(base, view.getUint32(48, true), memSize);
+  const cursorPtr = ptrFromOffset(base, view.getUint32(52, true), memSize);
+
+  return {
+    rows,
+    cols,
+    codepointsPtr,
+    contentTagsPtr: 0,
+    fgPtr,
+    bgPtr,
+    ulPtr,
+    ulStylePtr,
+    widePtr: 0,
+    flagsPtr: 0,
+    styleFlagsPtr: 0,
+    linkIdsPtr: 0,
+    graphemeOffsetPtr,
+    graphemeLenPtr,
+    graphemeBufferPtr,
+    graphemeBufferLen,
+    selectionStartPtr,
+    selectionEndPtr,
+    cursorPtr,
+  };
+}
+
+function readRenderPtrs(exports: WtermWasmExports, handle: number): RenderPtrs {
+  const rows = exports.wterm_render_rows ? exports.wterm_render_rows(handle) : exports.wterm_rows!(handle);
+  const cols = exports.wterm_render_cols ? exports.wterm_render_cols(handle) : exports.wterm_cols!(handle);
+  return {
+    rows,
+    cols,
+    codepointsPtr: exports.wterm_render_codepoints_ptr!(handle),
+    contentTagsPtr: 0,
+    widePtr: 0,
+    flagsPtr: 0,
+    styleFlagsPtr: 0,
+    linkIdsPtr: 0,
+    fgPtr: exports.wterm_render_fg_rgba_ptr!(handle),
+    bgPtr: exports.wterm_render_bg_rgba_ptr!(handle),
+    ulPtr: exports.wterm_render_ul_rgba_ptr!(handle),
+    ulStylePtr: exports.wterm_render_ul_style_ptr!(handle),
+    graphemeOffsetPtr: exports.wterm_render_grapheme_offset_ptr!(handle),
+    graphemeLenPtr: exports.wterm_render_grapheme_len_ptr!(handle),
+    graphemeBufferPtr: exports.wterm_render_grapheme_buffer_ptr!(handle),
+    graphemeBufferLen: exports.wterm_render_grapheme_buffer_len
+      ? exports.wterm_render_grapheme_buffer_len(handle)
+      : 0,
+    selectionStartPtr: exports.wterm_render_selection_start_ptr!(handle),
+    selectionEndPtr: exports.wterm_render_selection_end_ptr!(handle),
+    cursorPtr: exports.wterm_render_cursor_ptr!(handle),
+  };
+}
+
+function readCellPtrs(exports: WtermWasmExports, handle: number): RenderPtrs {
+  const rows = exports.wterm_rows!(handle);
+  const cols = exports.wterm_cols!(handle);
+  return {
+    rows,
+    cols,
+    codepointsPtr: exports.wterm_cell_codepoints_ptr!(handle),
+    contentTagsPtr: exports.wterm_cell_content_tags_ptr ? exports.wterm_cell_content_tags_ptr(handle) : 0,
+    widePtr: exports.wterm_cell_wide_ptr ? exports.wterm_cell_wide_ptr(handle) : 0,
+    flagsPtr: exports.wterm_cell_flags_ptr ? exports.wterm_cell_flags_ptr(handle) : 0,
+    styleFlagsPtr: exports.wterm_cell_style_flags_ptr ? exports.wterm_cell_style_flags_ptr(handle) : 0,
+    linkIdsPtr: exports.wterm_cell_link_ids_ptr ? exports.wterm_cell_link_ids_ptr(handle) : 0,
+    fgPtr: exports.wterm_cell_fg_rgba_ptr!(handle),
+    bgPtr: exports.wterm_cell_bg_rgba_ptr!(handle),
+    ulPtr: exports.wterm_cell_ul_rgba_ptr!(handle),
+    ulStylePtr: exports.wterm_cell_underline_styles_ptr!(handle),
+    graphemeOffsetPtr: exports.wterm_cell_grapheme_offsets_ptr!(handle),
+    graphemeLenPtr: exports.wterm_cell_grapheme_lengths_ptr!(handle),
+    graphemeBufferPtr: exports.wterm_grapheme_buffer_ptr!(handle),
+    graphemeBufferLen: exports.wterm_grapheme_buffer_len!(handle),
+    selectionStartPtr: exports.wterm_row_selection_start_ptr!(handle),
+    selectionEndPtr: exports.wterm_row_selection_end_ptr!(handle),
+    cursorPtr: exports.wterm_cursor_info_ptr!(handle),
+  };
+}
+
+export class WtermWasm {
+  readonly exports: WtermWasmExports;
+  readonly abi: WasmAbi;
+  readonly memory: WebAssembly.Memory;
+
+  private constructor(exports: WtermWasmExports, abi: WasmAbi) {
+    this.exports = exports;
+    this.abi = abi;
+    this.memory = exports.memory;
+  }
+
+  static async load(options: WtermWasmOptions = {}): Promise<WtermWasm> {
+    const bytes = decodeBase64(WASM_BASE64);
+    let memory: WebAssembly.Memory | null = null;
+    const log = options.log;
+
+    const imports = {
+      env: {
+        log: (ptr: number, len: number) => {
+          if (!memory || !ptr || !len) return;
+          const view = new Uint8Array(memory.buffer, ptr, len);
+          const text = textDecoder.decode(view);
+          if (log) log(text);
+        },
+      },
+    };
+
+    const { instance } = await WebAssembly.instantiate(bytes, imports);
+    const exports = instance.exports as WtermWasmExports;
+    memory = exports.memory ?? null;
+
+    const required = [
+      "memory",
+      "wterm_create",
+      "wterm_destroy",
+      "wterm_write",
+      "wterm_resize",
+      "wterm_render_update",
+      "wterm_alloc",
+      "wterm_free",
+    ];
+
+    for (const name of required) {
+      if (!(name in exports)) {
+        throw new Error(`missing WASM export: ${name}`);
+      }
+    }
+
+    const abi = resolveWasmAbi(exports);
+    if (!abi) {
+      throw new Error("missing render ABI exports");
+    }
+
+    return new WtermWasm(exports, abi);
+  }
+
+  create(cols: number, rows: number, maxScrollback: number): number {
+    return this.exports.wterm_create(cols, rows, maxScrollback);
+  }
+
+  destroy(handle: number): void {
+    this.exports.wterm_destroy(handle);
+  }
+
+  resize(handle: number, cols: number, rows: number): void {
+    this.exports.wterm_resize(handle, cols, rows);
+  }
+
+  setPixelSize(handle: number, widthPx: number, heightPx: number): void {
+    if (!this.exports.wterm_set_pixel_size) return;
+    this.exports.wterm_set_pixel_size(handle, widthPx, heightPx);
+  }
+
+  renderUpdate(handle: number): void {
+    this.exports.wterm_render_update(handle);
+  }
+
+  scrollViewport(handle: number, delta: number): void {
+    if (!this.exports.wterm_scroll_viewport) return;
+    this.exports.wterm_scroll_viewport(handle, delta);
+  }
+
+  drainOutput(handle: number): string {
+    if (!this.exports.wterm_output_ptr || !this.exports.wterm_output_len) return "";
+    const len = this.exports.wterm_output_len(handle);
+    if (!len) return "";
+    const ptr = this.exports.wterm_output_ptr(handle);
+    if (!ptr) return "";
+    const bytes = new Uint8Array(this.memory.buffer, ptr, len);
+    const copy = new Uint8Array(len);
+    copy.set(bytes);
+    if (this.exports.wterm_output_consume) {
+      this.exports.wterm_output_consume(handle, len);
+    }
+    return textDecoder.decode(copy);
+  }
+
+  getKittyKeyboardFlags(handle: number): number {
+    if (!this.exports.wterm_kitty_keyboard_flags) return 0;
+    return this.exports.wterm_kitty_keyboard_flags(handle) >>> 0;
+  }
+
+  getKittyPlacements(handle: number): KittyPlacement[] {
+    if (!this.exports.wterm_kitty_placement_count || !this.exports.wterm_kitty_placements_ptr) {
+      return [];
+    }
+    const count = this.exports.wterm_kitty_placement_count(handle) >>> 0;
+    if (!count) return [];
+    const ptr = this.exports.wterm_kitty_placements_ptr(handle) >>> 0;
+    if (!ptr) return [];
+    const stride = this.exports.wterm_kitty_placement_stride
+      ? this.exports.wterm_kitty_placement_stride() >>> 0
+      : 68;
+    if (!stride) return [];
+
+    const view = new DataView(this.memory.buffer, ptr, count * stride);
+    const placements: KittyPlacement[] = new Array(count);
+    for (let i = 0; i < count; i += 1) {
+      const base = i * stride;
+      placements[i] = {
+        imageId: view.getUint32(base + 0, true),
+        imageFormat: view.getUint8(base + 4),
+        imageWidth: view.getUint32(base + 8, true),
+        imageHeight: view.getUint32(base + 12, true),
+        imageDataPtr: view.getUint32(base + 16, true),
+        imageDataLen: view.getUint32(base + 20, true),
+        x: view.getInt32(base + 24, true),
+        y: view.getInt32(base + 28, true),
+        z: view.getInt32(base + 32, true),
+        width: view.getUint32(base + 36, true),
+        height: view.getUint32(base + 40, true),
+        cellOffsetX: view.getUint32(base + 44, true),
+        cellOffsetY: view.getUint32(base + 48, true),
+        sourceX: view.getUint32(base + 52, true),
+        sourceY: view.getUint32(base + 56, true),
+        sourceWidth: view.getUint32(base + 60, true),
+        sourceHeight: view.getUint32(base + 64, true),
+      };
+    }
+    return placements;
+  }
+
+  write(handle: number, text: string): void {
+    if (!text) return;
+    const bytes = textEncoder.encode(text);
+    const ptr = this.exports.wterm_alloc(bytes.length);
+    if (!ptr) return;
+    const view = new Uint8Array(this.memory.buffer, ptr, bytes.length);
+    view.set(bytes);
+    this.exports.wterm_write(handle, ptr, bytes.length);
+    this.exports.wterm_free(ptr, bytes.length);
+  }
+
+  setDefaultColors(handle: number, fg: number, bg: number, cursor: number): void {
+    if (!this.exports.wterm_set_default_colors) return;
+    this.exports.wterm_set_default_colors(handle, fg, bg, cursor);
+  }
+
+  setPalette(handle: number, colors: Uint8Array, count: number): void {
+    if (!this.exports.wterm_set_palette) return;
+    if (count <= 0 || colors.length < count * 3) return;
+    const byteLen = count * 3;
+    const ptr = this.exports.wterm_alloc(byteLen);
+    if (!ptr) return;
+    const view = new Uint8Array(this.memory.buffer, ptr, byteLen);
+    view.set(colors.subarray(0, byteLen));
+    this.exports.wterm_set_palette(handle, ptr, count);
+    this.exports.wterm_free(ptr, byteLen);
+  }
+
+  resetPalette(handle: number): void {
+    if (!this.exports.wterm_reset_palette) return;
+    this.exports.wterm_reset_palette(handle);
+  }
+
+  getRenderState(handle: number): RenderState | null {
+    const info =
+      this.abi.kind === "info"
+        ? readRenderInfo(this.exports, handle)
+        : this.abi.kind === "render"
+          ? readRenderPtrs(this.exports, handle)
+          : readCellPtrs(this.exports, handle);
+
+    if (!info) return null;
+    const { rows, cols } = info;
+    if (!rows || !cols) return null;
+
+    const cellCount = rows * cols;
+    const mem = this.memory;
+    const codepoints = info.codepointsPtr
+      ? new Uint32Array(mem.buffer, info.codepointsPtr, cellCount)
+      : null;
+    const contentTags = info.contentTagsPtr
+      ? new Uint8Array(mem.buffer, info.contentTagsPtr, cellCount)
+      : null;
+    const wide = info.widePtr
+      ? new Uint8Array(mem.buffer, info.widePtr, cellCount)
+      : null;
+    const cellFlags = info.flagsPtr
+      ? new Uint16Array(mem.buffer, info.flagsPtr, cellCount)
+      : null;
+    const styleFlags = info.styleFlagsPtr
+      ? new Uint16Array(mem.buffer, info.styleFlagsPtr, cellCount)
+      : null;
+    const linkIds = info.linkIdsPtr
+      ? new Uint32Array(mem.buffer, info.linkIdsPtr, cellCount)
+      : null;
+    const fgBytes = info.fgPtr
+      ? new Uint8Array(mem.buffer, info.fgPtr, cellCount * 4)
+      : null;
+    const bgBytes = info.bgPtr
+      ? new Uint8Array(mem.buffer, info.bgPtr, cellCount * 4)
+      : null;
+    const ulBytes = info.ulPtr
+      ? new Uint8Array(mem.buffer, info.ulPtr, cellCount * 4)
+      : null;
+    const ulStyle = info.ulStylePtr
+      ? new Uint8Array(mem.buffer, info.ulStylePtr, cellCount)
+      : null;
+    const linkCount = this.exports.wterm_link_count ? this.exports.wterm_link_count(handle) : 0;
+    const linkOffsets = linkCount && this.exports.wterm_link_offsets_ptr
+      ? new Uint32Array(mem.buffer, this.exports.wterm_link_offsets_ptr(handle), linkCount)
+      : null;
+    const linkLengths = linkCount && this.exports.wterm_link_lengths_ptr
+      ? new Uint32Array(mem.buffer, this.exports.wterm_link_lengths_ptr(handle), linkCount)
+      : null;
+    const linkBufferLen = this.exports.wterm_link_buffer_len
+      ? this.exports.wterm_link_buffer_len(handle)
+      : 0;
+    const linkBuffer = linkBufferLen && this.exports.wterm_link_buffer_ptr
+      ? new Uint8Array(mem.buffer, this.exports.wterm_link_buffer_ptr(handle), linkBufferLen)
+      : null;
+    const graphemeOffset = info.graphemeOffsetPtr
+      ? new Uint32Array(mem.buffer, info.graphemeOffsetPtr, cellCount)
+      : null;
+    const graphemeLen = info.graphemeLenPtr
+      ? new Uint32Array(mem.buffer, info.graphemeLenPtr, cellCount)
+      : null;
+    const graphemeBuffer =
+      info.graphemeBufferPtr && info.graphemeBufferLen
+        ? new Uint32Array(mem.buffer, info.graphemeBufferPtr, info.graphemeBufferLen)
+        : null;
+    const selectionStart = info.selectionStartPtr
+      ? new Int16Array(mem.buffer, info.selectionStartPtr, rows)
+      : null;
+    const selectionEnd = info.selectionEndPtr
+      ? new Int16Array(mem.buffer, info.selectionEndPtr, rows)
+      : null;
+    const cursorBytes = info.cursorPtr
+      ? new Uint8Array(mem.buffer, info.cursorPtr, 16)
+      : null;
+    const cursor = cursorBytes ? unpackCursor(cursorBytes, info.cursorPtr) : null;
+
+    return {
+      rows,
+      cols,
+      cellCount,
+      codepoints,
+      contentTags,
+      wide,
+      cellFlags,
+      styleFlags,
+      linkIds,
+      fgBytes,
+      bgBytes,
+      ulBytes,
+      ulStyle,
+      linkOffsets,
+      linkLengths,
+      linkBuffer,
+      graphemeOffset,
+      graphemeLen,
+      graphemeBuffer,
+      selectionStart,
+      selectionEnd,
+      cursor,
+    };
+  }
+}
+
+export async function loadWtermWasm(options: WtermWasmOptions = {}): Promise<WtermWasm> {
+  return WtermWasm.load(options);
+}

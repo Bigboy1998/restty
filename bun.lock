@@ -1,0 +1,18 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "wterm",
+      "devDependencies": {
+        "@webgpu/types": "^0.1.69",
+        "wgpu-polyfill": "^0.1.0",
+      },
+    },
+  },
+  "packages": {
+    "@webgpu/types": ["@webgpu/types@0.1.69", "", {}, "sha512-RPmm6kgRbI8e98zSD3RVACvnuktIja5+yLgDAkTmxLr90BEwdTXRQWNLF3ETTTyH/8mKhznZuN5AveXYFEsMGQ=="],
+
+    "wgpu-polyfill": ["wgpu-polyfill@0.1.0", "", { "os": [ "linux", "win32", "darwin", ], "cpu": [ "x64", "arm64", ] }, "sha512-baSM+uVnbatKAyuYcBGmACkxEVDgDVGAiEORFeCpp6YmQ8EdN4kXj2Jsc5cqGySw8DI5xj6BpTisUbrf3vM9FQ=="],
+  }
+}

@@ -1,0 +1,56 @@
+import { expect, test } from "bun:test";
+import { encodeBeforeInput, encodeKeyEvent, mapKeyForPty, sequences } from "../src/input/keymap";
+
+type KeyEventOverrides = Partial<KeyboardEvent> & {
+  key: string;
+  code?: string;
+};
+
+function keyEvent(overrides: KeyEventOverrides): KeyboardEvent {
+  const base = {
+    key: overrides.key,
+    code: overrides.code ?? "",
+    type: overrides.type ?? "keydown",
+    repeat: overrides.repeat ?? false,
+    isComposing: overrides.isComposing ?? false,
+    ctrlKey: overrides.ctrlKey ?? false,
+    altKey: overrides.altKey ?? false,
+    shiftKey: overrides.shiftKey ?? false,
+    metaKey: overrides.metaKey ?? false,
+    getModifierState: (_mod: string) => false,
+  };
+  return { ...base, ...overrides } as KeyboardEvent;
+}
+
+type BeforeInputOverrides = Partial<InputEvent> & {
+  inputType: string;
+  data?: string | null;
+};
+
+function beforeInputEvent(overrides: BeforeInputOverrides): InputEvent {
+  const base = {
+    inputType: overrides.inputType,
+    data: overrides.data ?? null,
+    dataTransfer: null,
+  };
+  return { ...base, ...overrides } as InputEvent;
+}
+
+test("default keymap emits terminal-standard backspace/delete", () => {
+  expect(encodeKeyEvent(keyEvent({ key: "Backspace", code: "Backspace" }))).toBe("\x7f");
+  expect(encodeKeyEvent(keyEvent({ key: "Delete", code: "Delete" }))).toBe("\x1b[3~");
+  expect(sequences.backspace).toBe("\x7f");
+  expect(sequences.delete).toBe("\x1b[3~");
+});
+
+test("beforeinput delete events map to terminal-standard sequences", () => {
+  expect(encodeBeforeInput(beforeInputEvent({ inputType: "deleteContentBackward" }))).toBe("\x7f");
+  expect(encodeBeforeInput(beforeInputEvent({ inputType: "deleteContentForward" }))).toBe("\x1b[3~");
+});
+
+test("mapKeyForPty normalizes legacy delete/backspace payloads", () => {
+  expect(mapKeyForPty("\x08")).toBe("\x7f");
+  expect(mapKeyForPty("\x08\x1b[P")).toBe("\x7f");
+  expect(mapKeyForPty("\x1b[P")).toBe("\x1b[3~");
+  expect(mapKeyForPty("\r\n")).toBe("\r");
+});

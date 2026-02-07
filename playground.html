@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>wterm</title>
+    <link rel="stylesheet" href="./playground/public/style.css" />
+  </head>
+  <body>
+    <main>
+      <canvas id="screen"></canvas>
+      <textarea
+        id="imeInput"
+        autocapitalize="off"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        aria-hidden="true"
+      ></textarea>
+      <pre id="termDebug" aria-live="polite"></pre>
+    </main>
+
+    <aside class="panel">
+      <header>
+        <h1>wterm</h1>
+        <div class="status-bar">
+          <span id="backend">-</span>
+          <span><span id="fps">0</span> fps</span>
+          <span id="termSize">-</span>
+        </div>
+      </header>
+
+      <section class="section">
+        <div class="row">
+          <button id="btnInit">Init</button>
+          <button id="btnPause">Pause</button>
+          <button id="btnClear">Clear</button>
+        </div>
+        <div class="row">
+          <select id="rendererSelect">
+            <option value="auto">Auto</option>
+            <option value="webgpu">WebGPU</option>
+            <option value="webgl2">WebGL2</option>
+          </select>
+          <input id="fontSize" type="number" min="10" max="64" step="1" value="18" title="Font size" />
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="row">
+          <input id="ptyUrl" type="text" value="ws://localhost:8787/pty" placeholder="PTY URL" />
+          <button id="btnPty">Connect</button>
+        </div>
+        <div class="hint"><span id="ptyStatus">disconnected</span></div>
+      </section>
+
+      <section class="section">
+        <div class="row">
+          <select id="themeSelect"><option value="">Default</option></select>
+          <select id="mouseMode">
+            <option value="auto">Mouse: Auto</option>
+            <option value="on" selected>On</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
+        <div class="row">
+          <input id="themeFile" type="file" accept=".conf,.theme,.txt" />
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="row">
+          <select id="demoSelect">
+            <option value="basic">Demo: Basic</option>
+            <option value="palette">Palette</option>
+            <option value="unicode">Unicode</option>
+            <option value="anim">Animation</option>
+          </select>
+          <button id="btnRunDemo">Run</button>
+        </div>
+      </section>
+
+      <details class="section">
+        <summary>Debug</summary>
+        <div class="debug-grid">
+          <span>DPR</span><span id="dpr">1</span>
+          <span>Size</span><span id="size">-</span>
+          <span>Grid</span><span id="grid">-</span>
+          <span>Cell</span><span id="cell">-</span>
+          <span>Cursor</span><span id="cursorPos">-</span>
+          <span>Mouse</span><span id="mouseStatus">-</span>
+          <span>Input</span><span id="inputDebug">-</span>
+          <span>Dbg</span><span id="dbg">-</span>
+        </div>
+      </details>
+
+      <details class="section">
+        <summary>Atlas</summary>
+        <div class="row">
+          <input id="atlasCp" type="text" placeholder="U+F0001" />
+          <button id="btnAtlas">Dump</button>
+        </div>
+        <div id="atlasInfo" class="hint">-</div>
+        <canvas id="atlasCanvas" width="64" height="64"></canvas>
+      </details>
+
+      <details class="section" open>
+        <summary>Log <span id="log">idle</span></summary>
+        <div class="row">
+          <button id="btnCopyLog">Copy</button>
+          <button id="btnClearLog">Clear</button>
+        </div>
+        <textarea id="logDump" readonly></textarea>
+      </details>
+    </aside>
+
+    <script type="module" src="./playground/app.ts"></script>
+  </body>
+</html>

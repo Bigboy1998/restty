@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build outputs and temp
+.tmp/
+dist/
+coverage/
+*.log
+
+# Local editor/system files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local tooling
+.crush/
+
+# Zig build cache/output
+wasm/.zig-cache/
+wasm/zig-cache/
+wasm/zig-out/
+
+# Generated bundles (can be re-built via npm scripts)
+playground/public/app.js
+playground/public/wterm-input.js
+playground/public/wterm-input.js.map
+playground/public/wterm-wasm.js
+playground/public/wterm-wasm.js.map
+
+# Local package archives
+*.tgz
