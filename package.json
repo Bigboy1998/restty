@@ -37,6 +37,7 @@
     "format:check": "bun run format:base --check",
     "prepublishOnly": "bun run build",
     "test": "bun test ./tests",
+    "test:ci": "bun test $(find tests -name '*.test.ts' ! -name 'webgpu-glyph.test.ts' | sort)",
     "pty": "bun run playground/pty-server.ts",
     "playground": "bun run playground/dev-server.ts",
     "playground:static": "bun run playground/server.ts"
