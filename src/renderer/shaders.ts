@@ -187,12 +187,12 @@ float luminance(vec3 color) {
 }
 
 void main() {
-  vec4 sample = texture(u_atlas, v_uv);
+  vec4 atlasSample = texture(u_atlas, v_uv);
   bool useLinear = u_blend.x > 0.5;
   bool useCorrection = u_blend.y > 0.5;
 
   if (v_mode > 0.5) {
-    vec4 color = sample;
+    vec4 color = atlasSample;
     if (useLinear) {
       color.rgb = srgbToLinear(color.rgb);
     }
@@ -210,7 +210,7 @@ void main() {
   fg.rgb *= fg.a;
   bg.rgb *= bg.a;
 
-  float alpha = sample.a;
+  float alpha = atlasSample.a;
   if (useCorrection && useLinear) {
     float fg_l = luminance(fg.rgb);
     float bg_l = luminance(bg.rgb);

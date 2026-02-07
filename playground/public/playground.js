@@ -18381,12 +18381,12 @@ float luminance(vec3 color) {
 }
 
 void main() {
-  vec4 sample = texture(u_atlas, v_uv);
+  vec4 atlasSample = texture(u_atlas, v_uv);
   bool useLinear = u_blend.x > 0.5;
   bool useCorrection = u_blend.y > 0.5;
 
   if (v_mode > 0.5) {
-    vec4 color = sample;
+    vec4 color = atlasSample;
     if (useLinear) {
       color.rgb = srgbToLinear(color.rgb);
     }
@@ -18404,7 +18404,7 @@ void main() {
   fg.rgb *= fg.a;
   bg.rgb *= bg.a;
 
-  float alpha = sample.a;
+  float alpha = atlasSample.a;
   if (useCorrection && useLinear) {
     float fg_l = luminance(fg.rgb);
     float bg_l = luminance(bg.rgb);
@@ -48636,6 +48636,230 @@ function getDefaultResttyAppSession() {
   return defaultResttyAppSession;
 }
 // src/app/panes.ts
+var RESTTY_PANE_ROOT_CLASS = "restty-pane-root";
+var RESTTY_PANE_STYLE_MARKER = "data-restty-pane-styles";
+var RESTTY_PANE_STYLE_TEXT = `
+.${RESTTY_PANE_ROOT_CLASS} {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane-split {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  gap: 0;
+  padding: 0;
+  background: var(--restty-pane-split-background, #111);
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane-split.is-vertical {
+  flex-direction: row;
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane-split.is-horizontal {
+  flex-direction: column;
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  background: var(--restty-pane-background, #000);
+  border: 0;
+  overflow: hidden;
+  opacity: var(--restty-pane-inactive-opacity, 0.82);
+  transition: opacity var(--restty-pane-opacity-transition, 140ms) ease-out;
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane.is-active {
+  opacity: var(--restty-pane-active-opacity, 1);
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane-divider {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 var(--restty-pane-divider-thickness, 1px);
+  touch-action: none;
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane-divider.is-vertical {
+  cursor: col-resize;
+  background: transparent;
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane-divider.is-horizontal {
+  cursor: row-resize;
+  background: transparent;
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane-divider.is-vertical:hover,
+.${RESTTY_PANE_ROOT_CLASS} .pane-divider.is-vertical.is-dragging {
+  background:
+    radial-gradient(
+      100px 46% at 50% 50%,
+      rgba(235, 235, 235, 0.92) 0%,
+      rgba(200, 200, 200, 0.48) 46%,
+      rgba(155, 155, 155, 0.12) 68%,
+      rgba(120, 120, 120, 0) 100%
+    ),
+    rgba(185, 185, 185, 0.24);
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane-divider.is-horizontal:hover,
+.${RESTTY_PANE_ROOT_CLASS} .pane-divider.is-horizontal.is-dragging {
+  background:
+    radial-gradient(
+      46% 100px at 50% 50%,
+      rgba(235, 235, 235, 0.92) 0%,
+      rgba(200, 200, 200, 0.48) 46%,
+      rgba(155, 155, 155, 0.12) 68%,
+      rgba(120, 120, 120, 0) 100%
+    ),
+    rgba(185, 185, 185, 0.24);
+}
+
+body.is-resizing-split {
+  user-select: none;
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane-ime-input {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.${RESTTY_PANE_ROOT_CLASS} .pane-term-debug {
+  display: none;
+}
+
+.pane-context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  background: #161616;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+}
+
+.pane-context-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #d6d6d6;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pane-context-menu-item:hover {
+  background: #252525;
+}
+
+.pane-context-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pane-context-menu-item.is-danger {
+  color: #f1a1a1;
+}
+
+.pane-context-menu-label {
+  font-size: 12px;
+}
+
+.pane-context-menu-shortcut {
+  font-size: 10px;
+  color: #868686;
+}
+
+.pane-context-menu-separator {
+  height: 1px;
+  margin: 6px 4px;
+  background: #2a2a2a;
+}
+`;
+var DEFAULT_RESTTY_PANE_STYLE_OPTIONS = {
+  splitBackground: "#111",
+  paneBackground: "#000",
+  inactivePaneOpacity: 0.82,
+  activePaneOpacity: 1,
+  opacityTransitionMs: 140,
+  dividerThicknessPx: 1
+};
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+function normalizeColor(value, fallback) {
+  if (typeof value !== "string")
+    return fallback;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : fallback;
+}
+function normalizePaneStyleOptions(options) {
+  const inactivePaneOpacity = Number.isFinite(options.inactivePaneOpacity) ? clampNumber(Number(options.inactivePaneOpacity), 0, 1) : DEFAULT_RESTTY_PANE_STYLE_OPTIONS.inactivePaneOpacity;
+  const activePaneOpacity = Number.isFinite(options.activePaneOpacity) ? clampNumber(Number(options.activePaneOpacity), 0, 1) : DEFAULT_RESTTY_PANE_STYLE_OPTIONS.activePaneOpacity;
+  const opacityTransitionMs = Number.isFinite(options.opacityTransitionMs) ? clampNumber(Number(options.opacityTransitionMs), 0, 5000) : DEFAULT_RESTTY_PANE_STYLE_OPTIONS.opacityTransitionMs;
+  const dividerThicknessPx = Number.isFinite(options.dividerThicknessPx) ? clampNumber(Number(options.dividerThicknessPx), 1, 32) : DEFAULT_RESTTY_PANE_STYLE_OPTIONS.dividerThicknessPx;
+  return {
+    splitBackground: normalizeColor(options.splitBackground, DEFAULT_RESTTY_PANE_STYLE_OPTIONS.splitBackground),
+    paneBackground: normalizeColor(options.paneBackground, DEFAULT_RESTTY_PANE_STYLE_OPTIONS.paneBackground),
+    inactivePaneOpacity,
+    activePaneOpacity,
+    opacityTransitionMs,
+    dividerThicknessPx
+  };
+}
+function ensureResttyPaneStylesDocument(doc) {
+  if (doc.querySelector(`style[${RESTTY_PANE_STYLE_MARKER}="1"]`))
+    return;
+  const style = doc.createElement("style");
+  style.setAttribute(RESTTY_PANE_STYLE_MARKER, "1");
+  style.textContent = RESTTY_PANE_STYLE_TEXT;
+  doc.head.appendChild(style);
+}
+function applyPaneStyleOptionsToRoot(root, options) {
+  root.classList.add(RESTTY_PANE_ROOT_CLASS);
+  root.style.setProperty("--restty-pane-split-background", options.splitBackground);
+  root.style.setProperty("--restty-pane-background", options.paneBackground);
+  root.style.setProperty("--restty-pane-inactive-opacity", options.inactivePaneOpacity.toFixed(3));
+  root.style.setProperty("--restty-pane-active-opacity", options.activePaneOpacity.toFixed(3));
+  root.style.setProperty("--restty-pane-opacity-transition", `${options.opacityTransitionMs}ms`);
+  root.style.setProperty("--restty-pane-divider-thickness", `${options.dividerThicknessPx}px`);
+}
+function clearPaneStyleOptionsFromRoot(root) {
+  root.classList.remove(RESTTY_PANE_ROOT_CLASS);
+  root.style.removeProperty("--restty-pane-split-background");
+  root.style.removeProperty("--restty-pane-background");
+  root.style.removeProperty("--restty-pane-inactive-opacity");
+  root.style.removeProperty("--restty-pane-active-opacity");
+  root.style.removeProperty("--restty-pane-opacity-transition");
+  root.style.removeProperty("--restty-pane-divider-thickness");
+}
 function getResttyShortcutModifierLabel() {
   const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
   return isMac ? "Cmd" : "Ctrl";
@@ -48722,6 +48946,17 @@ function createResttyPaneManager(options) {
   const paneCleanupFns = new Map;
   const minPaneSize = Number.isFinite(options.minPaneSize) ? Math.max(24, Number(options.minPaneSize)) : 96;
   const shortcutOptions = typeof options.shortcuts === "object" ? options.shortcuts : { enabled: options.shortcuts !== false };
+  const stylesInput = typeof options.styles === "object" && options.styles ? options.styles : undefined;
+  const stylesEnabled = options.styles === false ? false : stylesInput?.enabled ?? true;
+  let styleOptions = normalizePaneStyleOptions({
+    ...DEFAULT_RESTTY_PANE_STYLE_OPTIONS,
+    ...stylesInput
+  });
+  if (stylesEnabled) {
+    const doc = root.ownerDocument ?? document;
+    ensureResttyPaneStylesDocument(doc);
+    applyPaneStyleOptionsToRoot(root, styleOptions);
+  }
   let nextPaneId = 1;
   let activePaneId = null;
   let focusedPaneId = null;
@@ -48740,6 +48975,18 @@ function createResttyPaneManager(options) {
       resizeRaf = 0;
       options.onLayoutChanged?.();
     });
+  };
+  const getStyleOptions = () => ({
+    ...styleOptions
+  });
+  const setStyleOptions = (next) => {
+    styleOptions = normalizePaneStyleOptions({
+      ...styleOptions,
+      ...next
+    });
+    if (!stylesEnabled)
+      return;
+    applyPaneStyleOptionsToRoot(root, styleOptions);
   };
   const getPanes = () => Array.from(panes.values());
   const getPaneById = (id) => {
@@ -49176,6 +49423,9 @@ function createResttyPaneManager(options) {
     root.replaceChildren();
     hideContextMenu();
     contextMenuEl?.remove();
+    if (stylesEnabled) {
+      clearPaneStyleOptionsFromRoot(root);
+    }
   };
   const api = {
     getPanes,
@@ -49188,6 +49438,8 @@ function createResttyPaneManager(options) {
     splitPane,
     splitActivePane,
     closePane,
+    getStyleOptions,
+    setStyleOptions,
     requestLayoutSync,
     hideContextMenu,
     destroy
@@ -51714,9 +51966,21 @@ function createResttyApp(options) {
     if (!attachCanvasEvents)
       return;
     canvas.tabIndex = 0;
+    const focusTypingInput = () => {
+      canvas.focus({ preventScroll: true });
+      if (!imeInput)
+        return;
+      imeInput.focus({ preventScroll: true });
+      if (typeof document !== "undefined" && document.activeElement !== imeInput) {
+        requestAnimationFrame(() => {
+          if (document.activeElement === canvas)
+            imeInput.focus({ preventScroll: true });
+        });
+      }
+    };
     const handleFocus = () => {
       isFocused = true;
-      imeInput?.focus();
+      focusTypingInput();
       if (inputHandler?.isFocusReporting?.()) {
         sendKeyInput("\x1B[I");
       }
@@ -51729,8 +51993,7 @@ function createResttyApp(options) {
       }
     };
     const handlePointerFocus = () => {
-      canvas.focus();
-      imeInput?.focus();
+      focusTypingInput();
     };
     canvas.addEventListener("pointerdown", handlePointerFocus);
     canvas.addEventListener("focus", handleFocus);
@@ -54396,6 +54659,7 @@ function createResttyApp(options) {
     };
     const isMacInputSourceShortcut = (event) => isMacPlatform && event.ctrlKey && !event.metaKey && (event.code === "Space" || event.key === " " || event.key === "Spacebar");
     const shouldSkipKeyEvent = (event) => {
+      const imeActive = typeof document !== "undefined" && imeInput ? document.activeElement === imeInput : false;
       const target = event.target;
       if (target && target !== imeInput && ["BUTTON", "SELECT", "INPUT", "TEXTAREA"].includes(target.tagName)) {
         return true;
@@ -54403,10 +54667,10 @@ function createResttyApp(options) {
       if (target === imeInput) {
         if (imeState.composing || event.isComposing)
           return true;
-        if (!event.ctrlKey && !event.metaKey && event.key.length === 1)
+        if (!event.ctrlKey && !event.metaKey && event.key.length === 1 && !event.repeat)
           return true;
       }
-      if (imeInput && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1 && !event.isComposing && !imeState.composing) {
+      if (imeInput && imeActive && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1 && !event.repeat && !event.isComposing && !imeState.composing) {
         return true;
       }
       return false;
@@ -57119,5 +57383,5 @@ var firstPane = manager2.createInitialPane({ focus: true });
 activePaneId = firstPane.id;
 queueResizeAllPanes();
 
-//# debugId=235050062BD8C95164756E2164756E21
+//# debugId=A8D31E18AB1A56BF64756E2164756E21
 //# sourceMappingURL=app.js.map
