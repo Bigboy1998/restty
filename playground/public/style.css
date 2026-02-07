@@ -200,11 +200,12 @@ main {
   background: #000;
   border: 0;
   overflow: hidden;
-  filter: grayscale(0.82) brightness(0.72);
+  opacity: 0.82;
+  transition: opacity 140ms ease-out;
 }
 
 .pane.is-active {
-  filter: none;
+  opacity: 1;
 }
 
 .pane-divider {
