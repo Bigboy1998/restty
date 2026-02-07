@@ -1,5 +1,7 @@
 # Playground and Testing
 
+Hosted demo: `https://restty.pages.dev/`
+
 ## Quick Start (Bun)
 1. Build browser assets:
    - `bun run build:assets`

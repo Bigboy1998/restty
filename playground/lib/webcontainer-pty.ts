@@ -75,12 +75,62 @@ async function getSharedWebContainer(): Promise<WebContainer> {
   return sharedWebContainerPromise;
 }
 
+function firstNonEmptyLine(text: string): string | null {
+  for (const line of text.split("\n")) {
+    if (line.trim().length > 0) return line.trimStart();
+  }
+  return null;
+}
+
+function isLikelyShellScript(text: string): boolean {
+  const first = firstNonEmptyLine(text);
+  if (!first) return false;
+
+  const normalized = first.toLowerCase();
+  if (normalized.startsWith("<!doctype") || normalized.startsWith("<html") || normalized.startsWith("<")) {
+    return false;
+  }
+  if (normalized.startsWith(">")) return false;
+  if (!normalized.startsWith("#!")) return false;
+  return /#!.*\b(?:ba|da|z|k|a)?sh\b/.test(normalized);
+}
+
+function stripMarkdownQuotePrefix(text: string): string {
+  const lines = text.split("\n");
+  const first = lines.find((line) => line.trim().length > 0)?.trimStart() ?? "";
+  if (!first.startsWith(">")) return text;
+  return lines.map((line) => line.replace(/^\s*>\s?/, "")).join("\n");
+}
+
+function extractShellCodeFence(text: string): string | null {
+  const pattern = /```(?:[^\n`]*)\n([\s\S]*?)```/g;
+  for (const match of text.matchAll(pattern)) {
+    const candidate = stripMarkdownQuotePrefix(match[1] ?? "").trim();
+    if (candidate && isLikelyShellScript(candidate)) return candidate;
+  }
+  return null;
+}
+
+function normalizeFetchedScript(text: string): string | null {
+  const noBom = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
+  if (!noBom) return null;
+
+  if (isLikelyShellScript(noBom)) return `${noBom}\n`;
+
+  const dequoted = stripMarkdownQuotePrefix(noBom).trim();
+  if (dequoted !== noBom && isLikelyShellScript(dequoted)) return `${dequoted}\n`;
+
+  const fenced = extractShellCodeFence(noBom);
+  if (fenced) return `${fenced}\n`;
+
+  return null;
+}
+
 async function fetchScriptText(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) return null;
-    const text = await res.text();
-    return text.trim().length > 0 ? text : null;
+    return normalizeFetchedScript(await res.text());
   } catch {
     return null;
   }

@@ -278,6 +278,49 @@ export function createResttyPaneManager<TPane extends ResttyPaneDefinition>(
     return branches;
   };
 
+  const getRectEdgeDistanceSquared = (
+    sourceRect: DOMRectReadOnly,
+    targetRect: DOMRectReadOnly,
+  ): number => {
+    const dx = Math.max(targetRect.left - sourceRect.right, sourceRect.left - targetRect.right, 0);
+    const dy = Math.max(targetRect.top - sourceRect.bottom, sourceRect.top - targetRect.bottom, 0);
+    return dx ** 2 + dy ** 2;
+  };
+
+  const getRectCenterDistanceSquared = (
+    sourceRect: DOMRectReadOnly,
+    targetRect: DOMRectReadOnly,
+  ): number => {
+    const sourceCenterX = sourceRect.left + sourceRect.width * 0.5;
+    const sourceCenterY = sourceRect.top + sourceRect.height * 0.5;
+    const targetCenterX = targetRect.left + targetRect.width * 0.5;
+    const targetCenterY = targetRect.top + targetRect.height * 0.5;
+    const dx = targetCenterX - sourceCenterX;
+    const dy = targetCenterY - sourceCenterY;
+    return dx ** 2 + dy ** 2;
+  };
+
+  const findClosestPaneToRect = (sourceRect: DOMRectReadOnly | null): TPane | null => {
+    if (!sourceRect) return null;
+    let closestPane: TPane | null = null;
+    let closestEdgeDistance = Number.POSITIVE_INFINITY;
+    let closestCenterDistance = Number.POSITIVE_INFINITY;
+    for (const candidate of panes.values()) {
+      const targetRect = candidate.container.getBoundingClientRect();
+      const edgeDistance = getRectEdgeDistanceSquared(sourceRect, targetRect);
+      const centerDistance = getRectCenterDistanceSquared(sourceRect, targetRect);
+      if (
+        edgeDistance < closestEdgeDistance ||
+        (edgeDistance === closestEdgeDistance && centerDistance < closestCenterDistance)
+      ) {
+        closestPane = candidate;
+        closestEdgeDistance = edgeDistance;
+        closestCenterDistance = centerDistance;
+      }
+    }
+    return closestPane;
+  };
+
   const hideContextMenu = () => {
     if (!contextMenuEl) return;
     contextMenuEl.hidden = true;
@@ -545,6 +588,7 @@ export function createResttyPaneManager<TPane extends ResttyPaneDefinition>(
     if (panes.size <= 1) return false;
     const pane = panes.get(id);
     if (!pane) return false;
+    const closingRect = pane.container.getBoundingClientRect();
 
     const cleanupFns = paneCleanupFns.get(id) ?? [];
     paneCleanupFns.delete(id);
@@ -561,7 +605,7 @@ export function createResttyPaneManager<TPane extends ResttyPaneDefinition>(
     pane.container.remove();
     collapseSplitAncestors(parent);
 
-    const fallback = getActivePane() ?? getPanes()[0] ?? null;
+    const fallback = getActivePane() ?? findClosestPaneToRect(closingRect) ?? getPanes()[0] ?? null;
     if (fallback) {
       markPaneFocused(fallback.id, { focus: true });
     } else {

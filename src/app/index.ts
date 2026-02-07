@@ -205,6 +205,10 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   const BOLD_BRIGHTEN = 0.18;
   const BOLD_OFFSET = 0.06;
   const FAINT_ALPHA = 0.6;
+  const TARGET_RENDER_FPS = 60;
+  const BACKGROUND_RENDER_FPS = 15;
+  const GLYPH_SHAPE_CACHE_LIMIT = 12000;
+  const FONT_PICK_CACHE_LIMIT = 16000;
 
   let paused = false;
   let backend = "none";
@@ -243,6 +247,14 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   let lastCursorForCpr = { row: 1, col: 1 };
   let inputHandler: InputHandler | null = null;
   let activeTheme: GhosttyTheme | null = null;
+  let lastReportedPtyStatus = "";
+  let lastReportedMouseStatus = "";
+  let lastReportedTermCols = -1;
+  let lastReportedTermRows = -1;
+  let lastReportedCursorCol = -1;
+  let lastReportedCursorRow = -1;
+  let lastReportedDebugText = "";
+  const webgpuUniforms = new Float32Array(8);
   const logBuffer: string[] = [];
   const LOG_LIMIT = 200;
   const WASM_LOG_FILTERS = [
@@ -1068,11 +1080,15 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   }
 
   function setPtyStatus(text) {
+    if (text === lastReportedPtyStatus) return;
+    lastReportedPtyStatus = text;
     if (ptyStatusEl) ptyStatusEl.textContent = text;
     callbacks?.onPtyStatus?.(text);
   }
 
   function setMouseStatus(text) {
+    if (text === lastReportedMouseStatus) return;
+    lastReportedMouseStatus = text;
     if (mouseStatusEl) mouseStatusEl.textContent = text;
     callbacks?.onMouseStatus?.(text);
   }
@@ -2752,6 +2768,18 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     appendLog(`[ui] ${msg}`);
   }
 
+  function setBoundedMap<K, V>(map: Map<K, V>, key: K, value: V, limit: number): void {
+    if (map.has(key)) {
+      map.delete(key);
+    }
+    map.set(key, value);
+    if (map.size <= limit) return;
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) {
+      map.delete(oldest);
+    }
+  }
+
   function shouldSuppressWasmLog(text) {
     for (const filter of WASM_LOG_FILTERS) {
       if (filter.re.test(text)) {
@@ -3033,13 +3061,19 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     cleanupFns.push(() => ro.disconnect());
   }
 
-  function decodeRGBA(bytes, index) {
+  function decodeRGBAWithCache(bytes: Uint8Array, index: number, cache: Map<number, Color>): Color {
     const offset = index * 4;
-    const r = (bytes[offset] ?? 0) / 255;
-    const g = (bytes[offset + 1] ?? 0) / 255;
-    const b = (bytes[offset + 2] ?? 0) / 255;
-    const a = (bytes[offset + 3] ?? 0) / 255;
-    return [r, g, b, a];
+    const packed =
+      ((bytes[offset] ?? 0) |
+        ((bytes[offset + 1] ?? 0) << 8) |
+        ((bytes[offset + 2] ?? 0) << 16) |
+        ((bytes[offset + 3] ?? 0) << 24)) >>>
+      0;
+    const cached = cache.get(packed);
+    if (cached) return cached;
+    const decoded = decodePackedRGBA(packed);
+    cache.set(packed, decoded);
+    return decoded;
   }
 
   function decodePackedRGBA(color) {
@@ -3414,7 +3448,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     const glyphs = glyphBufferToShapedGlyphs(glyphBuffer);
     const advance = glyphs.reduce((sum, g) => sum + g.xAdvance, 0);
     const shaped = { glyphs, advance };
-    entry.glyphCache.set(text, shaped);
+    setBoundedMap(entry.glyphCache, text, shaped, GLYPH_SHAPE_CACHE_LIMIT);
     return shaped;
   }
 
@@ -3464,7 +3498,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
             }
           }
           if (ok) {
-            fontState.fontPickCache.set(cacheKey, symbolIndex);
+            setBoundedMap(fontState.fontPickCache, cacheKey, symbolIndex, FONT_PICK_CACHE_LIMIT);
             return symbolIndex;
           } else {
             console.warn(
@@ -3506,7 +3540,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
       }
     }
 
-    fontState.fontPickCache.set(cacheKey, bestIndex);
+    setBoundedMap(fontState.fontPickCache, cacheKey, bestIndex, FONT_PICK_CACHE_LIMIT);
     return bestIndex;
   }
 
@@ -3535,16 +3569,18 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     const cols = Math.max(1, Math.floor(canvas.width / metrics.cellW));
     const rows = Math.max(1, Math.floor(canvas.height / metrics.cellH));
     if (!Number.isFinite(cols) || !Number.isFinite(rows)) return;
-    if (gridEl) gridEl.textContent = `${cols}x${rows}`;
-    callbacks?.onGridSize?.(cols, rows);
-    if (cellEl) cellEl.textContent = `${Math.round(metrics.cellW)}x${Math.round(metrics.cellH)}`;
-    callbacks?.onCellSize?.(metrics.cellW, metrics.cellH);
+    const gridSizeChanged = cols !== gridState.cols || rows !== gridState.rows;
+    const cellSizeChanged = metrics.cellW !== gridState.cellW || metrics.cellH !== gridState.cellH;
+    if (gridSizeChanged) {
+      if (gridEl) gridEl.textContent = `${cols}x${rows}`;
+      callbacks?.onGridSize?.(cols, rows);
+    }
+    if (cellSizeChanged) {
+      if (cellEl) cellEl.textContent = `${Math.round(metrics.cellW)}x${Math.round(metrics.cellH)}`;
+      callbacks?.onCellSize?.(metrics.cellW, metrics.cellH);
+    }
     const changed =
-      cols !== gridState.cols ||
-      rows !== gridState.rows ||
-      metrics.fontSizePx !== gridState.fontSizePx ||
-      metrics.cellW !== gridState.cellW ||
-      metrics.cellH !== gridState.cellH;
+      gridSizeChanged || metrics.fontSizePx !== gridState.fontSizePx || cellSizeChanged;
 
     if (metrics.fontSizePx !== gridState.fontSizePx) {
       for (const entry of fontState.fonts) resetFontEntry(entry);
@@ -3845,13 +3881,42 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     return cursor.style ?? 0;
   }
 
+  function reportTermSize(cols: number, rows: number): void {
+    if (cols === lastReportedTermCols && rows === lastReportedTermRows) return;
+    lastReportedTermCols = cols;
+    lastReportedTermRows = rows;
+    if (termSizeEl) termSizeEl.textContent = `${cols}x${rows}`;
+    callbacks?.onTermSize?.(cols, rows);
+  }
+
+  function reportCursor(cursorPos: { col: number; row: number } | null): void {
+    if (!cursorPos) return;
+    const { col, row } = cursorPos;
+    if (cursorPosEl && (col !== lastReportedCursorCol || row !== lastReportedCursorRow)) {
+      cursorPosEl.textContent = `${col},${row}`;
+    }
+    if (col !== lastReportedCursorCol || row !== lastReportedCursorRow) {
+      callbacks?.onCursor?.(col, row);
+      lastReportedCursorCol = col;
+      lastReportedCursorRow = row;
+    }
+    lastCursorForCpr = { row: row + 1, col: col + 1 };
+  }
+
+  function reportDebugText(text: string): void {
+    if (text === lastReportedDebugText) return;
+    lastReportedDebugText = text;
+    if (dbgEl) dbgEl.textContent = text;
+    callbacks?.onDebug?.(text);
+  }
+
   function tickWebGPU(state) {
     const { device, context } = state;
 
     if (fontError) {
       const text = `Font error: ${fontError.message}`;
       if (termDebug) termDebug.textContent = text;
-      callbacks?.onDebug?.(text);
+      reportDebugText(text);
     }
 
     updateGrid();
@@ -3910,16 +3975,9 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     const { useLinearBlending, useLinearCorrection } = resolveBlendFlags("webgpu", state);
     const clearColor = useLinearBlending ? srgbToLinearColor(defaultBg) : defaultBg;
 
-    if (termSizeEl) termSizeEl.textContent = `${cols}x${rows}`;
-    callbacks?.onTermSize?.(cols, rows);
+    reportTermSize(cols, rows);
     const cursorPos = cursor ? resolveCursorPosition(cursor) : null;
-    if (cursorPosEl && cursorPos) {
-      cursorPosEl.textContent = `${cursorPos.col},${cursorPos.row}`;
-    }
-    if (cursorPos) {
-      callbacks?.onCursor?.(cursorPos.col, cursorPos.row);
-      lastCursorForCpr = { row: cursorPos.row + 1, col: cursorPos.col + 1 };
-    }
+    reportCursor(cursorPos);
     const isBlinking = (cursor?.blinking || 0) !== 0 || FORCE_CURSOR_BLINK;
     const blinkVisible = !isBlinking || Math.floor(performance.now() / CURSOR_BLINK_MS) % 2 === 0;
     const imeFocused =
@@ -3969,8 +4027,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         ? wasmExports.restty_debug_page_rows(wasmHandle)
         : 0;
       const text = `${cx},${cy} | ${sl}-${sr} | t:${tc}x${tr} p:${pc}x${pr}`;
-      dbgEl.textContent = text;
-      callbacks?.onDebug?.(text);
+      reportDebugText(text);
     }
 
     const cellW = gridState.cellW || canvas.width / cols;
@@ -4008,6 +4065,9 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     const overlayGlyphQueueByFont = new Map();
     const neededGlyphIdsByFont = new Map();
     const neededGlyphMetaByFont = new Map();
+    const fgColorCache = new Map<number, Color>();
+    const bgColorCache = new Map<number, Color>();
+    const ulColorCache = new Map<number, Color>();
     const baseScaleByFont = fontState.fonts.map((entry, idx) => {
       if (!entry?.font) return primaryScale;
       if (idx === 0) return primaryScale;
@@ -4105,7 +4165,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
       const baseY = rowY + yPad + baselineOffset;
       let selStart = selectionStart ? selectionStart[row] : -1;
       let selEnd = selectionEnd ? selectionEnd[row] : -1;
-      const localSel = selectionForRow(row, cols);
+      const localSel = selectionState.active ? selectionForRow(row, cols) : null;
       if (localSel) {
         selStart = localSel.start;
         selEnd = localSel.end;
@@ -4133,9 +4193,9 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         const overline = (flags & STYLE_OVERLINE) !== 0;
         const underlineStyle = ulStyle ? ulStyle[idx] : (flags & STYLE_UNDERLINE_MASK) >> 8;
 
-        let fg = decodeRGBA(fgBytes, idx);
-        let bg = bgBytes ? decodeRGBA(bgBytes, idx) : defaultBg;
-        let ul = ulBytes ? decodeRGBA(ulBytes, idx) : fg;
+        let fg = decodeRGBAWithCache(fgBytes, idx, fgColorCache);
+        let bg = bgBytes ? decodeRGBAWithCache(bgBytes, idx, bgColorCache) : defaultBg;
+        let ul = ulBytes ? decodeRGBAWithCache(ulBytes, idx, ulColorCache) : fg;
         const underlineUsesFg =
           ul[0] === fg[0] && ul[1] === fg[1] && ul[2] === fg[2] && ul[3] === fg[3];
 
@@ -4212,18 +4272,17 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         if (!cp) continue;
         if (cp === KITTY_PLACEHOLDER_CP) continue;
 
+        const extra = graphemeLen && graphemeOffset && graphemeBuffer ? (graphemeLen[idx] ?? 0) : 0;
+        if (extra === 0 && isSpaceCp(cp)) continue;
         let text = String.fromCodePoint(cp);
-        if (graphemeLen && graphemeOffset && graphemeBuffer) {
-          const extra = graphemeLen[idx] ?? 0;
-          if (extra > 0) {
-            const start = graphemeOffset[idx] ?? 0;
-            const cps = [cp];
-            for (let j = 0; j < extra; j += 1) {
-              const extraCp = graphemeBuffer[start + j];
-              if (extraCp) cps.push(extraCp);
-            }
-            text = String.fromCodePoint(...cps);
+        if (extra > 0 && graphemeOffset && graphemeBuffer) {
+          const start = graphemeOffset[idx] ?? 0;
+          const cps = [cp];
+          for (let j = 0; j < extra; j += 1) {
+            const extraCp = graphemeBuffer[start + j];
+            if (extraCp) cps.push(extraCp);
           }
+          text = String.fromCodePoint(...cps);
         }
 
         if (
@@ -4252,7 +4311,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
           if (drawPowerline(cp, x, rowY, cellW, cellH, fg, fgRectData)) continue;
         }
 
-        if (text.trim() === "") continue;
+        if (extra > 0 && text.trim() === "") continue;
 
         const baseSpan = wideFlag === 1 ? 2 : 1;
         const fontIndex = pickFontIndexForText(text, baseSpan);
@@ -4774,17 +4833,15 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
       }
     }
 
-    const uniforms = new Float32Array([
-      canvas.width,
-      canvas.height,
-      0,
-      0,
-      useLinearBlending ? 1 : 0,
-      useLinearCorrection ? 1 : 0,
-      0,
-      0,
-    ]);
-    device.queue.writeBuffer(state.uniformBuffer, 0, uniforms);
+    webgpuUniforms[0] = canvas.width;
+    webgpuUniforms[1] = canvas.height;
+    webgpuUniforms[2] = 0;
+    webgpuUniforms[3] = 0;
+    webgpuUniforms[4] = useLinearBlending ? 1 : 0;
+    webgpuUniforms[5] = useLinearCorrection ? 1 : 0;
+    webgpuUniforms[6] = 0;
+    webgpuUniforms[7] = 0;
+    device.queue.writeBuffer(state.uniformBuffer, 0, webgpuUniforms);
 
     const encoder = device.createCommandEncoder();
     const pass = encoder.beginRenderPass({
@@ -4968,7 +5025,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     if (fontError) {
       const text = `Font error: ${fontError.message}`;
       if (termDebug) termDebug.textContent = text;
-      callbacks?.onDebug?.(text);
+      reportDebugText(text);
     }
 
     updateGrid();
@@ -5008,16 +5065,9 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
 
     const { useLinearBlending, useLinearCorrection } = resolveBlendFlags("webgl2");
 
-    if (termSizeEl) termSizeEl.textContent = `${cols}x${rows}`;
-    callbacks?.onTermSize?.(cols, rows);
+    reportTermSize(cols, rows);
     const cursorPos = cursor ? resolveCursorPosition(cursor) : null;
-    if (cursorPosEl && cursorPos) {
-      cursorPosEl.textContent = `${cursorPos.col},${cursorPos.row}`;
-    }
-    if (cursorPos) {
-      callbacks?.onCursor?.(cursorPos.col, cursorPos.row);
-      lastCursorForCpr = { row: cursorPos.row + 1, col: cursorPos.col + 1 };
-    }
+    reportCursor(cursorPos);
     const isBlinking = (cursor?.blinking || 0) !== 0 || FORCE_CURSOR_BLINK;
     const blinkVisible = !isBlinking || Math.floor(performance.now() / CURSOR_BLINK_MS) % 2 === 0;
     const imeFocused =
@@ -5075,6 +5125,9 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     const overlayGlyphQueueByFont = new Map<number, any[]>();
     const neededGlyphIdsByFont = new Map<number, Set<number>>();
     const neededGlyphMetaByFont = new Map<number, Map<number, GlyphConstraintMeta>>();
+    const fgColorCache = new Map<number, Color>();
+    const bgColorCache = new Map<number, Color>();
+    const ulColorCache = new Map<number, Color>();
 
     const baseScaleByFont = fontState.fonts.map((entry, idx) => {
       if (!entry?.font) return primaryScale;
@@ -5178,7 +5231,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
       const baseY = rowY + yPad + baselineOffset;
       let selStart = selectionStart ? selectionStart[row] : -1;
       let selEnd = selectionEnd ? selectionEnd[row] : -1;
-      const localSel = selectionForRow(row, cols);
+      const localSel = selectionState.active ? selectionForRow(row, cols) : null;
       if (localSel) {
         selStart = localSel.start;
         selEnd = localSel.end;
@@ -5206,9 +5259,9 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         const overline = (flags & STYLE_OVERLINE) !== 0;
         const underlineStyle = ulStyle ? ulStyle[idx] : (flags & STYLE_UNDERLINE_MASK) >> 8;
 
-        let fg = decodeRGBA(fgBytes, idx);
-        let bg = bgBytes ? decodeRGBA(bgBytes, idx) : defaultBg;
-        let ul = ulBytes ? decodeRGBA(ulBytes, idx) : fg;
+        let fg = decodeRGBAWithCache(fgBytes, idx, fgColorCache);
+        let bg = bgBytes ? decodeRGBAWithCache(bgBytes, idx, bgColorCache) : defaultBg;
+        let ul = ulBytes ? decodeRGBAWithCache(ulBytes, idx, ulColorCache) : fg;
         const underlineUsesFg =
           ul[0] === fg[0] && ul[1] === fg[1] && ul[2] === fg[2] && ul[3] === fg[3];
 
@@ -5285,18 +5338,17 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         if (!cp) continue;
         if (cp === KITTY_PLACEHOLDER_CP) continue;
 
+        const extra = graphemeLen && graphemeOffset && graphemeBuffer ? (graphemeLen[idx] ?? 0) : 0;
+        if (extra === 0 && isSpaceCp(cp)) continue;
         let text = String.fromCodePoint(cp);
-        if (graphemeLen && graphemeOffset && graphemeBuffer) {
-          const extra = graphemeLen[idx] ?? 0;
-          if (extra > 0) {
-            const start = graphemeOffset[idx] ?? 0;
-            const cps = [cp];
-            for (let j = 0; j < extra; j += 1) {
-              const extraCp = graphemeBuffer[start + j];
-              if (extraCp) cps.push(extraCp);
-            }
-            text = String.fromCodePoint(...cps);
+        if (extra > 0 && graphemeOffset && graphemeBuffer) {
+          const start = graphemeOffset[idx] ?? 0;
+          const cps = [cp];
+          for (let j = 0; j < extra; j += 1) {
+            const extraCp = graphemeBuffer[start + j];
+            if (extraCp) cps.push(extraCp);
           }
+          text = String.fromCodePoint(...cps);
         }
 
         if (
@@ -5322,7 +5374,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
           if (drawPowerline(cp, x, rowY, cellW, cellH, fg, fgRectData)) continue;
         }
 
-        if (text.trim() === "") continue;
+        if (extra > 0 && text.trim() === "") continue;
 
         const baseSpan = wideFlag === 1 ? 2 : 1;
         const fontIndex = pickFontIndexForText(text, baseSpan);
@@ -5980,14 +6032,19 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         flushPendingTerminalResize();
       }
       resizeWasActive = resizeActive;
-      const renderBudget = resizeActive ? true : now - lastRenderTime >= 1000 / 30;
+      const hidden =
+        typeof document !== "undefined" &&
+        typeof document.visibilityState === "string" &&
+        document.visibilityState !== "visible";
+      const targetRenderFps = hidden ? BACKGROUND_RENDER_FPS : TARGET_RENDER_FPS;
+      const renderBudget = resizeActive ? true : now - lastRenderTime >= 1000 / targetRenderFps;
       if (needsRender && renderBudget) {
         if (backend === "webgpu") tickWebGPU(state);
         if (backend === "webgl2") tickWebGL(state);
         lastRenderTime = now;
         needsRender = false;
+        updateFps();
       }
-      updateFps();
     }
     rafId = requestAnimationFrame(() => loop(state));
   }
@@ -6185,7 +6242,10 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
 
       const seq = inputHandler.encodeKeyEvent(event);
       if (seq) {
-        if (event.type === "keydown" && ["Backspace", "Delete", "Del", "Enter"].includes(event.key)) {
+        if (
+          event.type === "keydown" &&
+          ["Backspace", "Delete", "Del", "Enter"].includes(event.key)
+        ) {
           lastKeydownSeq = seq;
           lastKeydownSeqAt = performance.now();
         }

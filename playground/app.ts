@@ -46,7 +46,9 @@ const btnClear = document.getElementById("btnClear");
 const rendererSelect = document.getElementById("rendererSelect") as HTMLSelectElement | null;
 const demoSelect = document.getElementById("demoSelect") as HTMLSelectElement | null;
 const btnRunDemo = document.getElementById("btnRunDemo");
-const connectionBackendEl = document.getElementById("connectionBackend") as HTMLSelectElement | null;
+const connectionBackendEl = document.getElementById(
+  "connectionBackend",
+) as HTMLSelectElement | null;
 const ptyUrlInput = document.getElementById("ptyUrl") as HTMLInputElement | null;
 const wcCommandInput = document.getElementById("wcCommand") as HTMLInputElement | null;
 const wcCwdInput = document.getElementById("wcCwd") as HTMLInputElement | null;
@@ -56,7 +58,9 @@ const themeSelect = document.getElementById("themeSelect") as HTMLSelectElement 
 const themeFileInput = document.getElementById("themeFile") as HTMLInputElement | null;
 const fontSizeInput = document.getElementById("fontSize") as HTMLInputElement | null;
 const fontFamilySelect = document.getElementById("fontFamily") as HTMLSelectElement | null;
-const fontFamilyLocalSelect = document.getElementById("fontFamilyLocal") as HTMLSelectElement | null;
+const fontFamilyLocalSelect = document.getElementById(
+  "fontFamilyLocal",
+) as HTMLSelectElement | null;
 const btnLoadLocalFonts = document.getElementById("btnLoadLocalFonts") as HTMLButtonElement | null;
 const fontFamilyHintEl = document.getElementById("fontFamilyHint");
 const atlasCpInput = document.getElementById("atlasCp") as HTMLInputElement | null;
@@ -186,10 +190,7 @@ function setFontFamilyHint(text: string) {
   if (fontFamilyHintEl) fontFamilyHintEl.textContent = text;
 }
 
-function buildFontSourcesForSelection(
-  value: string,
-  localMatcher: string,
-): ResttyFontSource[] {
+function buildFontSourcesForSelection(value: string, localMatcher: string): ResttyFontSource[] {
   const sources: ResttyFontSource[] = [];
 
   if (localMatcher) {
@@ -362,7 +363,8 @@ function createAdaptivePtyTransport(): PtyTransport {
   });
 
   let activeTransport: PtyTransport | null = null;
-  const pickTransport = () => (getConnectionBackend() === "webcontainer" ? webContainerTransport : wsTransport);
+  const pickTransport = () =>
+    getConnectionBackend() === "webcontainer" ? webContainerTransport : wsTransport;
 
   return {
     connect: (options) => {
@@ -453,7 +455,8 @@ function syncPtyButton(pane: Pane) {
     ptyBtn.textContent = "Disconnect";
     return;
   }
-  ptyBtn.textContent = getConnectionBackend() === "webcontainer" ? "Start WebContainer" : "Connect PTY";
+  ptyBtn.textContent =
+    getConnectionBackend() === "webcontainer" ? "Start WebContainer" : "Connect PTY";
 }
 
 function renderActivePaneStatus(pane: Pane) {
@@ -479,7 +482,9 @@ function renderActivePaneControls(pane: Pane) {
   syncFontFamilyControls();
   pane.mouseMode = pane.app.getMouseStatus().mode;
   if (mouseModeEl) {
-    const hasOption = Array.from(mouseModeEl.options).some((option) => option.value === pane.mouseMode);
+    const hasOption = Array.from(mouseModeEl.options).some(
+      (option) => option.value === pane.mouseMode,
+    );
     mouseModeEl.value = hasOption ? pane.mouseMode : "auto";
   }
   if (themeSelect) themeSelect.value = pane.theme.selectValue;
@@ -607,8 +612,12 @@ function createPane(id: number, cloneFrom?: Pane | null): Pane {
     app: null as unknown as ReturnType<typeof createResttyApp>,
     demos: null as unknown as ReturnType<typeof createDemoController>,
     paused: false,
-    renderer: cloneFrom?.renderer ?? (isRendererChoice(rendererSelect?.value) ? rendererSelect.value : "auto"),
-    fontSize: cloneFrom?.fontSize ?? parseFontSize(fontSizeInput?.value, Number.isFinite(initialFontSize) ? initialFontSize : 18),
+    renderer:
+      cloneFrom?.renderer ??
+      (isRendererChoice(rendererSelect?.value) ? rendererSelect.value : "auto"),
+    fontSize:
+      cloneFrom?.fontSize ??
+      parseFontSize(fontSizeInput?.value, Number.isFinite(initialFontSize) ? initialFontSize : 18),
     mouseMode: cloneFrom?.mouseMode ?? (mouseModeEl?.value || "on"),
     theme: cloneFrom
       ? {
@@ -718,9 +727,18 @@ function createPane(id: number, cloneFrom?: Pane | null): Pane {
   pane.ui.ptyStatus = pane.app.isPtyConnected() ? "connected" : "disconnected";
 
   if (pane.theme.selectValue) {
-    applyBuiltinThemeToPane(pane, pane.theme.selectValue, pane.theme.sourceLabel || pane.theme.selectValue);
+    applyBuiltinThemeToPane(
+      pane,
+      pane.theme.selectValue,
+      pane.theme.sourceLabel || pane.theme.selectValue,
+    );
   } else if (pane.theme.theme) {
-    applyThemeToPane(pane, pane.theme.theme, pane.theme.sourceLabel || "pane theme", pane.theme.selectValue);
+    applyThemeToPane(
+      pane,
+      pane.theme.theme,
+      pane.theme.sourceLabel || "pane theme",
+      pane.theme.selectValue,
+    );
   }
 
   pane.app.setMouseMode(pane.mouseMode);
@@ -790,14 +808,18 @@ settingsDialog?.addEventListener("cancel", (event) => {
   closeSettingsDialog();
 });
 
-window.addEventListener("keydown", (event) => {
-  if (isSettingsDialogOpen()) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeSettingsDialog();
+window.addEventListener(
+  "keydown",
+  (event) => {
+    if (isSettingsDialogOpen()) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSettingsDialog();
+      }
     }
-  }
-}, { capture: true });
+  },
+  { capture: true },
+);
 
 window.addEventListener("resize", () => {
   queueResizeAllPanes();

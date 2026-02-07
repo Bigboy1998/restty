@@ -33,6 +33,7 @@ var KITTY_SPECIAL_KEYS = {
   Backspace: { code: 127, final: "u" },
   Insert: { code: 2, final: "~" },
   Delete: { code: 3, final: "~" },
+  Del: { code: 3, final: "~" },
   ArrowLeft: { code: 1, final: "D" },
   ArrowRight: { code: 1, final: "C" },
   ArrowUp: { code: 1, final: "A" },
@@ -189,6 +190,7 @@ function encodeKeyEvent(event, config = DEFAULT_CONFIG, kittyFlags = 0) {
         seq = sequences.backspace;
         break;
       case "Delete":
+      case "Del":
         seq = sequences.delete;
         break;
       case "Tab":
@@ -48800,6 +48802,38 @@ function createResttyPaneManager(options) {
     }
     return branches;
   };
+  const getRectEdgeDistanceSquared = (sourceRect, targetRect) => {
+    const dx = Math.max(targetRect.left - sourceRect.right, sourceRect.left - targetRect.right, 0);
+    const dy = Math.max(targetRect.top - sourceRect.bottom, sourceRect.top - targetRect.bottom, 0);
+    return dx ** 2 + dy ** 2;
+  };
+  const getRectCenterDistanceSquared = (sourceRect, targetRect) => {
+    const sourceCenterX = sourceRect.left + sourceRect.width * 0.5;
+    const sourceCenterY = sourceRect.top + sourceRect.height * 0.5;
+    const targetCenterX = targetRect.left + targetRect.width * 0.5;
+    const targetCenterY = targetRect.top + targetRect.height * 0.5;
+    const dx = targetCenterX - sourceCenterX;
+    const dy = targetCenterY - sourceCenterY;
+    return dx ** 2 + dy ** 2;
+  };
+  const findClosestPaneToRect = (sourceRect) => {
+    if (!sourceRect)
+      return null;
+    let closestPane = null;
+    let closestEdgeDistance = Number.POSITIVE_INFINITY;
+    let closestCenterDistance = Number.POSITIVE_INFINITY;
+    for (const candidate of panes.values()) {
+      const targetRect = candidate.container.getBoundingClientRect();
+      const edgeDistance = getRectEdgeDistanceSquared(sourceRect, targetRect);
+      const centerDistance = getRectCenterDistanceSquared(sourceRect, targetRect);
+      if (edgeDistance < closestEdgeDistance || edgeDistance === closestEdgeDistance && centerDistance < closestCenterDistance) {
+        closestPane = candidate;
+        closestEdgeDistance = edgeDistance;
+        closestCenterDistance = centerDistance;
+      }
+    }
+    return closestPane;
+  };
   const hideContextMenu = () => {
     if (!contextMenuEl)
       return;
@@ -49047,6 +49081,7 @@ function createResttyPaneManager(options) {
     const pane = panes.get(id);
     if (!pane)
       return false;
+    const closingRect = pane.container.getBoundingClientRect();
     const cleanupFns = paneCleanupFns.get(id) ?? [];
     paneCleanupFns.delete(id);
     for (const cleanup of cleanupFns) {
@@ -49061,7 +49096,7 @@ function createResttyPaneManager(options) {
     const parent = pane.container.parentElement;
     pane.container.remove();
     collapseSplitAncestors(parent);
-    const fallback = getActivePane() ?? getPanes()[0] ?? null;
+    const fallback = getActivePane() ?? findClosestPaneToRect(closingRect) ?? getPanes()[0] ?? null;
     if (fallback) {
       markPaneFocused(fallback.id, { focus: true });
     } else {
@@ -49268,6 +49303,10 @@ function createResttyApp(options) {
   const BOLD_BRIGHTEN = 0.18;
   const BOLD_OFFSET = 0.06;
   const FAINT_ALPHA = 0.6;
+  const TARGET_RENDER_FPS = 60;
+  const BACKGROUND_RENDER_FPS = 15;
+  const GLYPH_SHAPE_CACHE_LIMIT = 12000;
+  const FONT_PICK_CACHE_LIMIT = 16000;
   let paused = false;
   let backend = "none";
   let preferredRenderer = options.renderer ?? "auto";
@@ -49297,11 +49336,22 @@ function createResttyApp(options) {
   let resizeWasActive = false;
   let pendingTerminalResize = null;
   let terminalResizeTimer = 0;
+  const KEYDOWN_BEFOREINPUT_DEDUPE_MS = 80;
+  let lastKeydownSeq = "";
+  let lastKeydownSeqAt = 0;
   let nextBlinkTime = performance.now() + CURSOR_BLINK_MS;
   const ptyTransport = options.ptyTransport ?? createWebSocketPtyTransport();
   let lastCursorForCpr = { row: 1, col: 1 };
   let inputHandler = null;
   let activeTheme = null;
+  let lastReportedPtyStatus = "";
+  let lastReportedMouseStatus = "";
+  let lastReportedTermCols = -1;
+  let lastReportedTermRows = -1;
+  let lastReportedCursorCol = -1;
+  let lastReportedCursorRow = -1;
+  let lastReportedDebugText = "";
+  const webgpuUniforms = new Float32Array(8);
   const logBuffer = [];
   const LOG_LIMIT = 200;
   const WASM_LOG_FILTERS = [
@@ -50028,11 +50078,17 @@ function createResttyApp(options) {
     imeState.selectionEnd = Math.max(imeState.selectionStart, Math.min(end, imeInput.value.length));
   }
   function setPtyStatus(text) {
+    if (text === lastReportedPtyStatus)
+      return;
+    lastReportedPtyStatus = text;
     if (ptyStatusEl)
       ptyStatusEl.textContent = text;
     callbacks?.onPtyStatus?.(text);
   }
   function setMouseStatus(text) {
+    if (text === lastReportedMouseStatus)
+      return;
+    lastReportedMouseStatus = text;
     if (mouseStatusEl)
       mouseStatusEl.textContent = text;
     callbacks?.onMouseStatus?.(text);
@@ -50294,6 +50350,13 @@ function createResttyApp(options) {
         }
         const text = inputHandler.encodeBeforeInput(event);
         if (text) {
+          const now = performance.now();
+          if (lastKeydownSeq && text === lastKeydownSeq && now - lastKeydownSeqAt <= KEYDOWN_BEFOREINPUT_DEDUPE_MS) {
+            event.preventDefault();
+            suppressNextInput = true;
+            imeInput.value = "";
+            return;
+          }
           event.preventDefault();
           suppressNextInput = true;
           sendKeyInput(text);
@@ -51440,6 +51503,18 @@ function createResttyApp(options) {
   function log(msg) {
     appendLog(`[ui] ${msg}`);
   }
+  function setBoundedMap(map, key, value, limit) {
+    if (map.has(key)) {
+      map.delete(key);
+    }
+    map.set(key, value);
+    if (map.size <= limit)
+      return;
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) {
+      map.delete(oldest);
+    }
+  }
   function shouldSuppressWasmLog(text) {
     for (const filter of WASM_LOG_FILTERS) {
       if (filter.re.test(text)) {
@@ -51681,13 +51756,15 @@ function createResttyApp(options) {
     ro.observe(target);
     cleanupFns.push(() => ro.disconnect());
   }
-  function decodeRGBA(bytes, index) {
+  function decodeRGBAWithCache(bytes, index, cache) {
     const offset = index * 4;
-    const r3 = (bytes[offset] ?? 0) / 255;
-    const g = (bytes[offset + 1] ?? 0) / 255;
-    const b3 = (bytes[offset + 2] ?? 0) / 255;
-    const a3 = (bytes[offset + 3] ?? 0) / 255;
-    return [r3, g, b3, a3];
+    const packed = ((bytes[offset] ?? 0) | (bytes[offset + 1] ?? 0) << 8 | (bytes[offset + 2] ?? 0) << 16 | (bytes[offset + 3] ?? 0) << 24) >>> 0;
+    const cached = cache.get(packed);
+    if (cached)
+      return cached;
+    const decoded = decodePackedRGBA(packed);
+    cache.set(packed, decoded);
+    return decoded;
   }
   function decodePackedRGBA(color) {
     return [
@@ -52020,7 +52097,7 @@ function createResttyApp(options) {
     const glyphs = glyphBufferToShapedGlyphs(glyphBuffer);
     const advance = glyphs.reduce((sum, g) => sum + g.xAdvance, 0);
     const shaped = { glyphs, advance };
-    entry.glyphCache.set(text, shaped);
+    setBoundedMap(entry.glyphCache, text, shaped, GLYPH_SHAPE_CACHE_LIMIT);
     return shaped;
   }
   function noteColorGlyphText(entry, text, shaped) {
@@ -52066,7 +52143,7 @@ function createResttyApp(options) {
             }
           }
           if (ok) {
-            fontState.fontPickCache.set(cacheKey, symbolIndex);
+            setBoundedMap(fontState.fontPickCache, cacheKey, symbolIndex, FONT_PICK_CACHE_LIMIT);
             return symbolIndex;
           } else {
             console.warn(`[font] Nerd symbol U+${firstCp.toString(16).toUpperCase()} not found in symbol font ${entry.label}`);
@@ -52106,7 +52183,7 @@ function createResttyApp(options) {
         bestIndex = i3;
       }
     }
-    fontState.fontPickCache.set(cacheKey, bestIndex);
+    setBoundedMap(fontState.fontPickCache, cacheKey, bestIndex, FONT_PICK_CACHE_LIMIT);
     return bestIndex;
   }
   function computeCellMetrics() {
@@ -52134,13 +52211,19 @@ function createResttyApp(options) {
     const rows = Math.max(1, Math.floor(canvas.height / metrics.cellH));
     if (!Number.isFinite(cols) || !Number.isFinite(rows))
       return;
-    if (gridEl)
-      gridEl.textContent = `${cols}x${rows}`;
-    callbacks?.onGridSize?.(cols, rows);
-    if (cellEl)
-      cellEl.textContent = `${Math.round(metrics.cellW)}x${Math.round(metrics.cellH)}`;
-    callbacks?.onCellSize?.(metrics.cellW, metrics.cellH);
-    const changed = cols !== gridState.cols || rows !== gridState.rows || metrics.fontSizePx !== gridState.fontSizePx || metrics.cellW !== gridState.cellW || metrics.cellH !== gridState.cellH;
+    const gridSizeChanged = cols !== gridState.cols || rows !== gridState.rows;
+    const cellSizeChanged = metrics.cellW !== gridState.cellW || metrics.cellH !== gridState.cellH;
+    if (gridSizeChanged) {
+      if (gridEl)
+        gridEl.textContent = `${cols}x${rows}`;
+      callbacks?.onGridSize?.(cols, rows);
+    }
+    if (cellSizeChanged) {
+      if (cellEl)
+        cellEl.textContent = `${Math.round(metrics.cellW)}x${Math.round(metrics.cellH)}`;
+      callbacks?.onCellSize?.(metrics.cellW, metrics.cellH);
+    }
+    const changed = gridSizeChanged || metrics.fontSizePx !== gridState.fontSizePx || cellSizeChanged;
     if (metrics.fontSizePx !== gridState.fontSizePx) {
       for (const entry of fontState.fonts)
         resetFontEntry(entry);
@@ -52408,13 +52491,44 @@ function createResttyApp(options) {
       return null;
     return cursor.style ?? 0;
   }
+  function reportTermSize(cols, rows) {
+    if (cols === lastReportedTermCols && rows === lastReportedTermRows)
+      return;
+    lastReportedTermCols = cols;
+    lastReportedTermRows = rows;
+    if (termSizeEl)
+      termSizeEl.textContent = `${cols}x${rows}`;
+    callbacks?.onTermSize?.(cols, rows);
+  }
+  function reportCursor(cursorPos) {
+    if (!cursorPos)
+      return;
+    const { col, row } = cursorPos;
+    if (cursorPosEl && (col !== lastReportedCursorCol || row !== lastReportedCursorRow)) {
+      cursorPosEl.textContent = `${col},${row}`;
+    }
+    if (col !== lastReportedCursorCol || row !== lastReportedCursorRow) {
+      callbacks?.onCursor?.(col, row);
+      lastReportedCursorCol = col;
+      lastReportedCursorRow = row;
+    }
+    lastCursorForCpr = { row: row + 1, col: col + 1 };
+  }
+  function reportDebugText(text) {
+    if (text === lastReportedDebugText)
+      return;
+    lastReportedDebugText = text;
+    if (dbgEl)
+      dbgEl.textContent = text;
+    callbacks?.onDebug?.(text);
+  }
   function tickWebGPU(state) {
     const { device, context } = state;
     if (fontError) {
       const text = `Font error: ${fontError.message}`;
       if (termDebug)
         termDebug.textContent = text;
-      callbacks?.onDebug?.(text);
+      reportDebugText(text);
     }
     updateGrid();
     const render = getRenderState();
@@ -52465,17 +52579,9 @@ function createResttyApp(options) {
       return;
     const { useLinearBlending, useLinearCorrection } = resolveBlendFlags("webgpu", state);
     const clearColor = useLinearBlending ? srgbToLinearColor(defaultBg) : defaultBg;
-    if (termSizeEl)
-      termSizeEl.textContent = `${cols}x${rows}`;
-    callbacks?.onTermSize?.(cols, rows);
+    reportTermSize(cols, rows);
     const cursorPos = cursor ? resolveCursorPosition(cursor) : null;
-    if (cursorPosEl && cursorPos) {
-      cursorPosEl.textContent = `${cursorPos.col},${cursorPos.row}`;
-    }
-    if (cursorPos) {
-      callbacks?.onCursor?.(cursorPos.col, cursorPos.row);
-      lastCursorForCpr = { row: cursorPos.row + 1, col: cursorPos.col + 1 };
-    }
+    reportCursor(cursorPos);
     const isBlinking = (cursor?.blinking || 0) !== 0 || FORCE_CURSOR_BLINK;
     const blinkVisible = !isBlinking || Math.floor(performance.now() / CURSOR_BLINK_MS) % 2 === 0;
     const imeFocused = typeof document !== "undefined" && imeInput ? document.activeElement === imeInput : false;
@@ -52506,8 +52612,7 @@ function createResttyApp(options) {
       const pc = wasmExports.restty_debug_page_cols ? wasmExports.restty_debug_page_cols(wasmHandle) : 0;
       const pr = wasmExports.restty_debug_page_rows ? wasmExports.restty_debug_page_rows(wasmHandle) : 0;
       const text = `${cx},${cy} | ${sl}-${sr} | t:${tc}x${tr} p:${pc}x${pr}`;
-      dbgEl.textContent = text;
-      callbacks?.onDebug?.(text);
+      reportDebugText(text);
     }
     const cellW = gridState.cellW || canvas.width / cols;
     const cellH = gridState.cellH || canvas.height / rows;
@@ -52539,6 +52644,9 @@ function createResttyApp(options) {
     const overlayGlyphQueueByFont = new Map;
     const neededGlyphIdsByFont = new Map;
     const neededGlyphMetaByFont = new Map;
+    const fgColorCache = new Map;
+    const bgColorCache = new Map;
+    const ulColorCache = new Map;
     const baseScaleByFont = fontState.fonts.map((entry, idx) => {
       if (!entry?.font)
         return primaryScale;
@@ -52634,7 +52742,7 @@ function createResttyApp(options) {
       const baseY = rowY + yPad + baselineOffset;
       let selStart = selectionStart ? selectionStart[row] : -1;
       let selEnd = selectionEnd ? selectionEnd[row] : -1;
-      const localSel = selectionForRow(row, cols);
+      const localSel = selectionState.active ? selectionForRow(row, cols) : null;
       if (localSel) {
         selStart = localSel.start;
         selEnd = localSel.end;
@@ -52659,9 +52767,9 @@ function createResttyApp(options) {
         const strike = (flags & STYLE_STRIKE) !== 0;
         const overline = (flags & STYLE_OVERLINE) !== 0;
         const underlineStyle = ulStyle ? ulStyle[idx] : (flags & STYLE_UNDERLINE_MASK) >> 8;
-        let fg = decodeRGBA(fgBytes, idx);
-        let bg = bgBytes ? decodeRGBA(bgBytes, idx) : defaultBg;
-        let ul = ulBytes ? decodeRGBA(ulBytes, idx) : fg;
+        let fg = decodeRGBAWithCache(fgBytes, idx, fgColorCache);
+        let bg = bgBytes ? decodeRGBAWithCache(bgBytes, idx, bgColorCache) : defaultBg;
+        let ul = ulBytes ? decodeRGBAWithCache(ulBytes, idx, ulColorCache) : fg;
         const underlineUsesFg = ul[0] === fg[0] && ul[1] === fg[1] && ul[2] === fg[2] && ul[3] === fg[3];
         if (inverse) {
           const tmp = fg;
@@ -52712,19 +52820,19 @@ function createResttyApp(options) {
           continue;
         if (cp === KITTY_PLACEHOLDER_CP)
           continue;
+        const extra = graphemeLen && graphemeOffset && graphemeBuffer ? graphemeLen[idx] ?? 0 : 0;
+        if (extra === 0 && isSpaceCp(cp))
+          continue;
         let text = String.fromCodePoint(cp);
-        if (graphemeLen && graphemeOffset && graphemeBuffer) {
-          const extra = graphemeLen[idx] ?? 0;
-          if (extra > 0) {
-            const start = graphemeOffset[idx] ?? 0;
-            const cps = [cp];
-            for (let j = 0;j < extra; j += 1) {
-              const extraCp = graphemeBuffer[start + j];
-              if (extraCp)
-                cps.push(extraCp);
-            }
-            text = String.fromCodePoint(...cps);
+        if (extra > 0 && graphemeOffset && graphemeBuffer) {
+          const start = graphemeOffset[idx] ?? 0;
+          const cps = [cp];
+          for (let j = 0;j < extra; j += 1) {
+            const extraCp = graphemeBuffer[start + j];
+            if (extraCp)
+              cps.push(extraCp);
           }
+          text = String.fromCodePoint(...cps);
         }
         if (cursorBlock && cursorCell && row === cursorCell.row && col >= cursorCell.col && col < cursorCell.col + (cursorCell.wide ? 2 : 1)) {
           fg = [bgForText[0], bgForText[1], bgForText[2], 1];
@@ -52745,7 +52853,7 @@ function createResttyApp(options) {
           if (drawPowerline(cp, x3, rowY, cellW, cellH, fg, fgRectData))
             continue;
         }
-        if (text.trim() === "")
+        if (extra > 0 && text.trim() === "")
           continue;
         const baseSpan = wideFlag === 1 ? 2 : 1;
         const fontIndex = pickFontIndexForText(text, baseSpan);
@@ -53163,17 +53271,15 @@ function createResttyApp(options) {
         }
       }
     }
-    const uniforms = new Float32Array([
-      canvas.width,
-      canvas.height,
-      0,
-      0,
-      useLinearBlending ? 1 : 0,
-      useLinearCorrection ? 1 : 0,
-      0,
-      0
-    ]);
-    device.queue.writeBuffer(state.uniformBuffer, 0, uniforms);
+    webgpuUniforms[0] = canvas.width;
+    webgpuUniforms[1] = canvas.height;
+    webgpuUniforms[2] = 0;
+    webgpuUniforms[3] = 0;
+    webgpuUniforms[4] = useLinearBlending ? 1 : 0;
+    webgpuUniforms[5] = useLinearCorrection ? 1 : 0;
+    webgpuUniforms[6] = 0;
+    webgpuUniforms[7] = 0;
+    device.queue.writeBuffer(state.uniformBuffer, 0, webgpuUniforms);
     const encoder = device.createCommandEncoder();
     const pass = encoder.beginRenderPass({
       colorAttachments: [
@@ -53315,7 +53421,7 @@ function createResttyApp(options) {
       const text = `Font error: ${fontError.message}`;
       if (termDebug)
         termDebug.textContent = text;
-      callbacks?.onDebug?.(text);
+      reportDebugText(text);
     }
     updateGrid();
     const render = getRenderState();
@@ -53348,17 +53454,9 @@ function createResttyApp(options) {
       return;
     }
     const { useLinearBlending, useLinearCorrection } = resolveBlendFlags("webgl2");
-    if (termSizeEl)
-      termSizeEl.textContent = `${cols}x${rows}`;
-    callbacks?.onTermSize?.(cols, rows);
+    reportTermSize(cols, rows);
     const cursorPos = cursor ? resolveCursorPosition(cursor) : null;
-    if (cursorPosEl && cursorPos) {
-      cursorPosEl.textContent = `${cursorPos.col},${cursorPos.row}`;
-    }
-    if (cursorPos) {
-      callbacks?.onCursor?.(cursorPos.col, cursorPos.row);
-      lastCursorForCpr = { row: cursorPos.row + 1, col: cursorPos.col + 1 };
-    }
+    reportCursor(cursorPos);
     const isBlinking = (cursor?.blinking || 0) !== 0 || FORCE_CURSOR_BLINK;
     const blinkVisible = !isBlinking || Math.floor(performance.now() / CURSOR_BLINK_MS) % 2 === 0;
     const imeFocused = typeof document !== "undefined" && imeInput ? document.activeElement === imeInput : false;
@@ -53407,6 +53505,9 @@ function createResttyApp(options) {
     const overlayGlyphQueueByFont = new Map;
     const neededGlyphIdsByFont = new Map;
     const neededGlyphMetaByFont = new Map;
+    const fgColorCache = new Map;
+    const bgColorCache = new Map;
+    const ulColorCache = new Map;
     const baseScaleByFont = fontState.fonts.map((entry, idx) => {
       if (!entry?.font)
         return primaryScale;
@@ -53502,7 +53603,7 @@ function createResttyApp(options) {
       const baseY = rowY + yPad + baselineOffset;
       let selStart = selectionStart ? selectionStart[row] : -1;
       let selEnd = selectionEnd ? selectionEnd[row] : -1;
-      const localSel = selectionForRow(row, cols);
+      const localSel = selectionState.active ? selectionForRow(row, cols) : null;
       if (localSel) {
         selStart = localSel.start;
         selEnd = localSel.end;
@@ -53527,9 +53628,9 @@ function createResttyApp(options) {
         const strike = (flags & STYLE_STRIKE) !== 0;
         const overline = (flags & STYLE_OVERLINE) !== 0;
         const underlineStyle = ulStyle ? ulStyle[idx] : (flags & STYLE_UNDERLINE_MASK) >> 8;
-        let fg = decodeRGBA(fgBytes, idx);
-        let bg = bgBytes ? decodeRGBA(bgBytes, idx) : defaultBg;
-        let ul = ulBytes ? decodeRGBA(ulBytes, idx) : fg;
+        let fg = decodeRGBAWithCache(fgBytes, idx, fgColorCache);
+        let bg = bgBytes ? decodeRGBAWithCache(bgBytes, idx, bgColorCache) : defaultBg;
+        let ul = ulBytes ? decodeRGBAWithCache(ulBytes, idx, ulColorCache) : fg;
         const underlineUsesFg = ul[0] === fg[0] && ul[1] === fg[1] && ul[2] === fg[2] && ul[3] === fg[3];
         if (inverse) {
           const tmp = fg;
@@ -53580,19 +53681,19 @@ function createResttyApp(options) {
           continue;
         if (cp === KITTY_PLACEHOLDER_CP)
           continue;
+        const extra = graphemeLen && graphemeOffset && graphemeBuffer ? graphemeLen[idx] ?? 0 : 0;
+        if (extra === 0 && isSpaceCp(cp))
+          continue;
         let text = String.fromCodePoint(cp);
-        if (graphemeLen && graphemeOffset && graphemeBuffer) {
-          const extra = graphemeLen[idx] ?? 0;
-          if (extra > 0) {
-            const start = graphemeOffset[idx] ?? 0;
-            const cps = [cp];
-            for (let j = 0;j < extra; j += 1) {
-              const extraCp = graphemeBuffer[start + j];
-              if (extraCp)
-                cps.push(extraCp);
-            }
-            text = String.fromCodePoint(...cps);
+        if (extra > 0 && graphemeOffset && graphemeBuffer) {
+          const start = graphemeOffset[idx] ?? 0;
+          const cps = [cp];
+          for (let j = 0;j < extra; j += 1) {
+            const extraCp = graphemeBuffer[start + j];
+            if (extraCp)
+              cps.push(extraCp);
           }
+          text = String.fromCodePoint(...cps);
         }
         if (cursorBlock && cursorCell && row === cursorCell.row && col >= cursorCell.col && col < cursorCell.col + (cursorCell.wide ? 2 : 1)) {
           fg = [bgForText[0], bgForText[1], bgForText[2], 1];
@@ -53613,7 +53714,7 @@ function createResttyApp(options) {
           if (drawPowerline(cp, x3, rowY, cellW, cellH, fg, fgRectData))
             continue;
         }
-        if (text.trim() === "")
+        if (extra > 0 && text.trim() === "")
           continue;
         const baseSpan = wideFlag === 1 ? 2 : 1;
         const fontIndex = pickFontIndexForText(text, baseSpan);
@@ -54151,7 +54252,9 @@ function createResttyApp(options) {
         flushPendingTerminalResize();
       }
       resizeWasActive = resizeActive;
-      const renderBudget = resizeActive ? true : now - lastRenderTime >= 1000 / 30;
+      const hidden = typeof document !== "undefined" && typeof document.visibilityState === "string" && document.visibilityState !== "visible";
+      const targetRenderFps = hidden ? BACKGROUND_RENDER_FPS : TARGET_RENDER_FPS;
+      const renderBudget = resizeActive ? true : now - lastRenderTime >= 1000 / targetRenderFps;
       if (needsRender && renderBudget) {
         if (backend === "webgpu")
           tickWebGPU(state);
@@ -54159,8 +54262,8 @@ function createResttyApp(options) {
           tickWebGL(state);
         lastRenderTime = now;
         needsRender = false;
+        updateFps();
       }
-      updateFps();
     }
     rafId = requestAnimationFrame(() => loop(state));
   }
@@ -54302,8 +54405,6 @@ function createResttyApp(options) {
           return true;
         if (!event.ctrlKey && !event.metaKey && event.key.length === 1)
           return true;
-        if (event.type === "keydown" && ["Backspace", "Enter"].includes(event.key))
-          return true;
       }
       if (imeInput && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1 && !event.isComposing && !imeState.composing) {
         return true;
@@ -54335,6 +54436,10 @@ function createResttyApp(options) {
       }
       const seq = inputHandler.encodeKeyEvent(event);
       if (seq) {
+        if (event.type === "keydown" && ["Backspace", "Delete", "Del", "Enter"].includes(event.key)) {
+          lastKeydownSeq = seq;
+          lastKeydownSeqAt = performance.now();
+        }
         event.preventDefault();
         sendKeyInput(seq);
       }
@@ -55783,13 +55888,70 @@ async function getSharedWebContainer() {
   }
   return sharedWebContainerPromise;
 }
+function firstNonEmptyLine(text) {
+  for (const line of text.split(`
+`)) {
+    if (line.trim().length > 0)
+      return line.trimStart();
+  }
+  return null;
+}
+function isLikelyShellScript(text) {
+  const first = firstNonEmptyLine(text);
+  if (!first)
+    return false;
+  const normalized = first.toLowerCase();
+  if (normalized.startsWith("<!doctype") || normalized.startsWith("<html") || normalized.startsWith("<")) {
+    return false;
+  }
+  if (normalized.startsWith(">"))
+    return false;
+  if (!normalized.startsWith("#!"))
+    return false;
+  return /#!.*\b(?:ba|da|z|k|a)?sh\b/.test(normalized);
+}
+function stripMarkdownQuotePrefix(text) {
+  const lines = text.split(`
+`);
+  const first = lines.find((line) => line.trim().length > 0)?.trimStart() ?? "";
+  if (!first.startsWith(">"))
+    return text;
+  return lines.map((line) => line.replace(/^\s*>\s?/, "")).join(`
+`);
+}
+function extractShellCodeFence(text) {
+  const pattern = /```(?:[^\n`]*)\n([\s\S]*?)```/g;
+  for (const match of text.matchAll(pattern)) {
+    const candidate = stripMarkdownQuotePrefix(match[1] ?? "").trim();
+    if (candidate && isLikelyShellScript(candidate))
+      return candidate;
+  }
+  return null;
+}
+function normalizeFetchedScript(text) {
+  const noBom = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, `
+`).trim();
+  if (!noBom)
+    return null;
+  if (isLikelyShellScript(noBom))
+    return `${noBom}
+`;
+  const dequoted = stripMarkdownQuotePrefix(noBom).trim();
+  if (dequoted !== noBom && isLikelyShellScript(dequoted))
+    return `${dequoted}
+`;
+  const fenced = extractShellCodeFence(noBom);
+  if (fenced)
+    return `${fenced}
+`;
+  return null;
+}
 async function fetchScriptText(url) {
   try {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok)
       return null;
-    const text = await res.text();
-    return text.trim().length > 0 ? text : null;
+    return normalizeFetchedScript(await res.text());
   } catch {
     return null;
   }
@@ -56957,5 +57119,5 @@ var firstPane = manager2.createInitialPane({ focus: true });
 activePaneId = firstPane.id;
 queueResizeAllPanes();
 
-//# debugId=D5D379096E527DCB64756E2164756E21
+//# debugId=EF15E2E6AAB8BD5764756E2164756E21
 //# sourceMappingURL=app.js.map

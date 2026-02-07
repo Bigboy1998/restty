@@ -2,6 +2,8 @@
 
 This folder organizes project docs by audience:
 
+Live demo: `https://restty.pages.dev/`
+
 - User-facing docs:
   - [`goals.md`](./goals.md): project intent and boundaries.
   - [`how-it-works.md`](./how-it-works.md): end-to-end runtime flow.

@@ -8,6 +8,8 @@
 
 Powerful, lightweight browser terminal. Batteries included.
 
+Live demo: `https://restty.pages.dev/`
+
 Powered by:
 - `libghostty-vt` (WASM terminal core)
 - `WebGPU` (with WebGL2 fallback)
