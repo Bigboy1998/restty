@@ -6,110 +6,124 @@
 [![Discord](https://img.shields.io/badge/-Discord-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/zemMZtrkSb)
 [![Support me](https://img.shields.io/badge/-Support%20me-ff69b4?style=flat-square&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/vivy-company)
 
-Experimental project: browser terminal rendering with a WASM terminal core, GPU rendering (WebGPU + WebGL2 fallback), and TypeScript text shaping.
+Powerful, lightweight browser terminal. Batteries included.
 
-restty combines a Zig/WASM VT engine, modern browser rendering pipelines, and a local playground + PTY server to iterate quickly on terminal behavior.
+Powered by:
+- `libghostty-vt` (WASM terminal core)
+- `WebGPU` (with WebGL2 fallback)
+- `text-shaper` (shaping + raster)
 
-## Why
+## Install
 
-- Build a browser terminal stack with explicit control over rendering and input.
-- Keep terminal state logic in WASM while using TS/JS for browser integration.
-- Validate behavior with focused tests (input mapping, UTF-8 handling, kitty graphics, glyph rendering).
-- Iterate visually via a local playground without heavy framework overhead.
+```bash
+npm i restty
+```
 
-## How it works
+## Minimal setup
 
-1. PTY output bytes are fed into the WASM terminal core.
-2. WASM exposes render/cell state to the TypeScript runtime.
-3. Text shaping and glyph atlas generation happen in TS.
-4. Renderer draws frames via WebGPU (or WebGL2 fallback).
-5. Input (keyboard/mouse/IME) is encoded and sent back to PTY.
+`restty` ships with built-in text shaping and embedded WASM. You only need a canvas (and optional IME textarea).
 
-## Documentation
-
-- Start here: `docs/README.md`
-- Initial goals and scope: `docs/goals.md`
-- End-to-end runtime flow: `docs/how-it-works.md`
-- Integration and usage: `docs/usage.md`
-- Internal architecture notes: `docs/internals/`
-
-## App integration
-
-Simple usage (built-in `text-shaper` is used automatically):
+```html
+<canvas id="term"></canvas>
+<textarea id="ime" style="position:absolute;left:-9999px;top:-9999px"></textarea>
+```
 
 ```ts
 import { createResttyApp } from "restty";
 
 const app = createResttyApp({
-  canvas: document.getElementById("screen") as HTMLCanvasElement,
+  canvas: document.getElementById("term") as HTMLCanvasElement,
+  imeInput: document.getElementById("ime") as HTMLTextAreaElement,
+  renderer: "auto", // "auto" | "webgpu" | "webgl2"
 });
+
+await app.init();
 ```
 
-## Repository layout
+## Common examples
 
-- `src/` - Main library/runtime code (renderer, input, PTY bridge, app integration).
-- `tests/` - Bun test suite.
-- `playground/` - Browser playground app and local PTY websocket server.
-- `playground/public/` - Playground static assets (fonts/wasm bundles).
-- `assets/themes/` - Source-of-truth Ghostty theme files.
-- `scripts/` - Setup helper scripts.
-- `wasm/` - Zig source and build config for the WASM core.
-- `docs/` - User docs, architecture notes, and development references.
-- `reference/ghostty` - Upstream Ghostty reference (submodule).
-- `reference/text-shaper` - Upstream text-shaper reference (submodule).
+### Connect to a PTY websocket
 
-## Requirements
+```ts
+app.connectPty("ws://localhost:8787/pty");
+```
 
-- Bun `>=1.2.0`
-- Git with submodule support
-- Optional: Zig (if rebuilding WASM artifacts from source)
+### Apply a built-in theme
 
-## Quick start
+```ts
+import { getBuiltinTheme } from "restty";
+
+const theme = getBuiltinTheme("Aizen Dark");
+if (theme) app.applyTheme(theme);
+```
+
+### Parse and apply a custom Ghostty theme
+
+```ts
+import { parseGhosttyTheme } from "restty";
+
+const themeText = `
+foreground = #c0caf5
+background = #1a1b26
+cursor-color = #c0caf5
+`;
+app.applyTheme(parseGhosttyTheme(themeText), "inline");
+```
+
+### Send input manually
+
+```ts
+app.sendInput("ls -la\n");
+```
+
+## App API (high level)
+
+Main methods:
+- `init()`
+- `destroy()`
+- `connectPty(url)` / `disconnectPty()`
+- `isPtyConnected()`
+- `setRenderer("auto" | "webgpu" | "webgl2")`
+- `setFontSize(number)`
+- `applyTheme(theme)` / `resetTheme()`
+- `setMouseMode("auto" | "on" | "off")`
+- `sendInput(text)` / `sendKeyInput(text)`
+- `copySelectionToClipboard()` / `pasteFromClipboard()`
+- `updateSize(force?)`
+
+Low-level ABI access is also available via `loadResttyWasm()` if you need direct render-state integration.
+
+## Local development
 
 ```bash
+git clone https://github.com/wiedymi/restty.git
+cd restty
 git submodule update --init --recursive
 bun install
 bun run build:themes
 bun run build:assets
+bun run pty
 bun run playground
 ```
 
 Open `http://localhost:5173`.
 
-## Commands
+## Commands (repo)
 
 ```bash
-# Run all tests
-bun run test
-
-# Start PTY websocket server (default ws://localhost:8787/pty)
-bun run pty
-
-# Build playground/runtime bundles
-bun run build:assets
-
-# Regenerate embedded built-in theme catalog for the library
-bun run build:themes
-
-# Lint + format checks
-bun run lint
-bun run format:check
-
-# Serve playground static files only
-bun run playground:static
+bun run build         # build package output
+bun run test          # full tests
+bun run test:ci       # CI-safe test target
+bun run lint          # lint
+bun run format:check  # formatting check (src only)
+bun run build:assets  # playground bundles
+bun run pty           # local PTY server
+bun run playground    # playground dev server
 ```
 
-## Testing
+## Docs
 
-Current suite covers:
-
-- key/input encoding (`tests/input-keymap.test.ts`, `tests/input-kitty.test.ts`)
-- PTY UTF-8 stream behavior (`tests/pty-utf8.test.ts`)
-- output filtering and kitty graphics (`tests/output-filter.test.ts`, `tests/kitty-*.test.ts`)
-- renderer/glyph checks (`tests/box-drawing.test.ts`, `tests/webgpu-glyph.test.ts`)
-
-## Notes
-
-- `tests/webgpu-glyph.test.ts` can bootstrap polyfill artifacts via `scripts/setup-wgpu-polyfill.ts`.
-- Built-in themes are embedded in `src/theme/builtin-themes.ts` (generated via `scripts/generate-builtin-themes.ts`).
-- Some generated playground assets are intentionally committed for reproducible local runs.
+- `docs/README.md` - docs index
+- `docs/usage.md` - integration details
+- `docs/how-it-works.md` - runtime flow
+- `docs/internals/` - architecture docs
