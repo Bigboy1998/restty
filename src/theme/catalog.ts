@@ -13,9 +13,7 @@ export function listBuiltinThemeNames(): ResttyBuiltinThemeName[] {
   return [...BUILTIN_THEME_NAMES];
 }
 
-export function isBuiltinThemeName(
-  name: string,
-): name is ResttyBuiltinThemeName {
+export function isBuiltinThemeName(name: string): name is ResttyBuiltinThemeName {
   return Object.prototype.hasOwnProperty.call(BUILTIN_THEME_SOURCES, name);
 }
 

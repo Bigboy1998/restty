@@ -21,7 +21,10 @@ export class MouseController {
 
   private sendReply: (data: string) => void;
   private positionToCell: (event: MouseEvent | PointerEvent | WheelEvent) => CellPosition;
-  private positionToPixel?: (event: MouseEvent | PointerEvent | WheelEvent) => { x: number; y: number };
+  private positionToPixel?: (event: MouseEvent | PointerEvent | WheelEvent) => {
+    x: number;
+    y: number;
+  };
 
   constructor(options: MouseControllerOptions) {
     this.sendReply = options.sendReply;
@@ -37,7 +40,9 @@ export class MouseController {
     this.positionToCell = fn;
   }
 
-  setPositionToPixel(fn: (event: MouseEvent | PointerEvent | WheelEvent) => { x: number; y: number }) {
+  setPositionToPixel(
+    fn: (event: MouseEvent | PointerEvent | WheelEvent) => { x: number; y: number },
+  ) {
     this.positionToPixel = fn;
   }
 

@@ -18,11 +18,7 @@ export function createPtyConnection(): PtyConnectionState {
   };
 }
 
-export function connectPty(
-  state: PtyConnectionState,
-  url: string,
-  callbacks: PtyCallbacks,
-): void {
+export function connectPty(state: PtyConnectionState, url: string, callbacks: PtyCallbacks): void {
   if (state.connected) return;
   if (!url) return;
 
@@ -114,11 +110,7 @@ export function sendPtyInput(state: PtyConnectionState, data: string): boolean {
   return true;
 }
 
-export function sendPtyResize(
-  state: PtyConnectionState,
-  cols: number,
-  rows: number,
-): boolean {
+export function sendPtyResize(state: PtyConnectionState, cols: number, rows: number): boolean {
   if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return false;
   const message: PtyMessage = { type: "resize", cols, rows };
   state.socket.send(JSON.stringify(message));

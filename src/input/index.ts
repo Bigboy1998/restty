@@ -1,12 +1,7 @@
 import { encodeBeforeInput, encodeKeyEvent, mapKeyForPty, sequences } from "./keymap";
 import { MouseController } from "./mouse";
 import { OutputFilter } from "./output";
-import type {
-  InputHandler,
-  InputHandlerConfig,
-  InputHandlerOptions,
-  MouseMode,
-} from "./types";
+import type { InputHandler, InputHandlerConfig, InputHandlerOptions, MouseMode } from "./types";
 
 /**
  * Create a terminal input handler with key, IME, PTY, and mouse support.

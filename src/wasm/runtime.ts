@@ -160,8 +160,94 @@ type RenderPtrs = {
   cursorPtr: number;
 };
 
+type ViewEntry<T extends ArrayBufferView> = {
+  buffer: ArrayBufferLike | null;
+  ptr: number;
+  len: number;
+  view: T | null;
+};
+
+type RenderViewCache = {
+  codepoints: ViewEntry<Uint32Array>;
+  contentTags: ViewEntry<Uint8Array>;
+  wide: ViewEntry<Uint8Array>;
+  cellFlags: ViewEntry<Uint16Array>;
+  styleFlags: ViewEntry<Uint16Array>;
+  linkIds: ViewEntry<Uint32Array>;
+  fgBytes: ViewEntry<Uint8Array>;
+  bgBytes: ViewEntry<Uint8Array>;
+  ulBytes: ViewEntry<Uint8Array>;
+  ulStyle: ViewEntry<Uint8Array>;
+  linkOffsets: ViewEntry<Uint32Array>;
+  linkLengths: ViewEntry<Uint32Array>;
+  linkBuffer: ViewEntry<Uint8Array>;
+  graphemeOffset: ViewEntry<Uint32Array>;
+  graphemeLen: ViewEntry<Uint32Array>;
+  graphemeBuffer: ViewEntry<Uint32Array>;
+  selectionStart: ViewEntry<Int16Array>;
+  selectionEnd: ViewEntry<Int16Array>;
+};
+
+type TypedArrayCtor<T extends ArrayBufferView> = new (
+  buffer: ArrayBufferLike,
+  byteOffset: number,
+  length: number,
+) => T;
+
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
+
+function makeViewEntry<T extends ArrayBufferView>(): ViewEntry<T> {
+  return { buffer: null, ptr: 0, len: 0, view: null };
+}
+
+function makeRenderViewCache(): RenderViewCache {
+  return {
+    codepoints: makeViewEntry<Uint32Array>(),
+    contentTags: makeViewEntry<Uint8Array>(),
+    wide: makeViewEntry<Uint8Array>(),
+    cellFlags: makeViewEntry<Uint16Array>(),
+    styleFlags: makeViewEntry<Uint16Array>(),
+    linkIds: makeViewEntry<Uint32Array>(),
+    fgBytes: makeViewEntry<Uint8Array>(),
+    bgBytes: makeViewEntry<Uint8Array>(),
+    ulBytes: makeViewEntry<Uint8Array>(),
+    ulStyle: makeViewEntry<Uint8Array>(),
+    linkOffsets: makeViewEntry<Uint32Array>(),
+    linkLengths: makeViewEntry<Uint32Array>(),
+    linkBuffer: makeViewEntry<Uint8Array>(),
+    graphemeOffset: makeViewEntry<Uint32Array>(),
+    graphemeLen: makeViewEntry<Uint32Array>(),
+    graphemeBuffer: makeViewEntry<Uint32Array>(),
+    selectionStart: makeViewEntry<Int16Array>(),
+    selectionEnd: makeViewEntry<Int16Array>(),
+  };
+}
+
+function getCachedView<T extends ArrayBufferView>(
+  entry: ViewEntry<T>,
+  buffer: ArrayBufferLike,
+  ptr: number,
+  len: number,
+  Ctor: TypedArrayCtor<T>,
+): T | null {
+  if (!ptr || len <= 0) {
+    entry.buffer = buffer;
+    entry.ptr = 0;
+    entry.len = 0;
+    entry.view = null;
+    return null;
+  }
+  if (entry.view && entry.buffer === buffer && entry.ptr === ptr && entry.len === len) {
+    return entry.view;
+  }
+  const view = new Ctor(buffer, ptr, len);
+  entry.buffer = buffer;
+  entry.ptr = ptr;
+  entry.len = len;
+  entry.view = view;
+  return view;
+}
 
 function decodeBase64(base64: string): Uint8Array {
   const cleaned = base64.replace(/\s+/g, "");
@@ -200,9 +286,9 @@ function ptrFromOffset(base: number, offset: number, memSize: number): number {
   return 0;
 }
 
-function unpackCursor(bytes: Uint8Array, ptr: number): CursorInfo | null {
+function unpackCursor(buffer: ArrayBufferLike, ptr: number): CursorInfo | null {
   if (!ptr) return null;
-  const view = new DataView(bytes.buffer, ptr, 16);
+  const view = new DataView(buffer, ptr, 16);
   return {
     row: view.getUint16(0, true),
     col: view.getUint16(2, true),
@@ -264,8 +350,12 @@ function readRenderInfo(exports: ResttyWasmExports, handle: number): RenderPtrs 
 }
 
 function readRenderPtrs(exports: ResttyWasmExports, handle: number): RenderPtrs {
-  const rows = exports.restty_render_rows ? exports.restty_render_rows(handle) : exports.restty_rows!(handle);
-  const cols = exports.restty_render_cols ? exports.restty_render_cols(handle) : exports.restty_cols!(handle);
+  const rows = exports.restty_render_rows
+    ? exports.restty_render_rows(handle)
+    : exports.restty_rows!(handle);
+  const cols = exports.restty_render_cols
+    ? exports.restty_render_cols(handle)
+    : exports.restty_cols!(handle);
   return {
     rows,
     cols,
@@ -298,10 +388,14 @@ function readCellPtrs(exports: ResttyWasmExports, handle: number): RenderPtrs {
     rows,
     cols,
     codepointsPtr: exports.restty_cell_codepoints_ptr!(handle),
-    contentTagsPtr: exports.restty_cell_content_tags_ptr ? exports.restty_cell_content_tags_ptr(handle) : 0,
+    contentTagsPtr: exports.restty_cell_content_tags_ptr
+      ? exports.restty_cell_content_tags_ptr(handle)
+      : 0,
     widePtr: exports.restty_cell_wide_ptr ? exports.restty_cell_wide_ptr(handle) : 0,
     flagsPtr: exports.restty_cell_flags_ptr ? exports.restty_cell_flags_ptr(handle) : 0,
-    styleFlagsPtr: exports.restty_cell_style_flags_ptr ? exports.restty_cell_style_flags_ptr(handle) : 0,
+    styleFlagsPtr: exports.restty_cell_style_flags_ptr
+      ? exports.restty_cell_style_flags_ptr(handle)
+      : 0,
     linkIdsPtr: exports.restty_cell_link_ids_ptr ? exports.restty_cell_link_ids_ptr(handle) : 0,
     fgPtr: exports.restty_cell_fg_rgba_ptr!(handle),
     bgPtr: exports.restty_cell_bg_rgba_ptr!(handle),
@@ -321,11 +415,13 @@ export class ResttyWasm {
   readonly exports: ResttyWasmExports;
   readonly abi: WasmAbi;
   readonly memory: WebAssembly.Memory;
+  private readonly renderViewCaches: Map<number, RenderViewCache>;
 
   private constructor(exports: ResttyWasmExports, abi: WasmAbi) {
     this.exports = exports;
     this.abi = abi;
     this.memory = exports.memory;
+    this.renderViewCaches = new Map();
   }
 
   static async load(options: ResttyWasmOptions = {}): Promise<ResttyWasm> {
@@ -378,7 +474,17 @@ export class ResttyWasm {
   }
 
   destroy(handle: number): void {
+    this.renderViewCaches.delete(handle);
     this.exports.restty_destroy(handle);
+  }
+
+  private getRenderViewCache(handle: number): RenderViewCache {
+    let cache = this.renderViewCaches.get(handle);
+    if (!cache) {
+      cache = makeRenderViewCache();
+      this.renderViewCaches.set(handle, cache);
+    }
+    return cache;
   }
 
   resize(handle: number, cols: number, rows: number): void {
@@ -506,69 +612,109 @@ export class ResttyWasm {
 
     const cellCount = rows * cols;
     const mem = this.memory;
-    const codepoints = info.codepointsPtr
-      ? new Uint32Array(mem.buffer, info.codepointsPtr, cellCount)
-      : null;
-    const contentTags = info.contentTagsPtr
-      ? new Uint8Array(mem.buffer, info.contentTagsPtr, cellCount)
-      : null;
-    const wide = info.widePtr
-      ? new Uint8Array(mem.buffer, info.widePtr, cellCount)
-      : null;
-    const cellFlags = info.flagsPtr
-      ? new Uint16Array(mem.buffer, info.flagsPtr, cellCount)
-      : null;
-    const styleFlags = info.styleFlagsPtr
-      ? new Uint16Array(mem.buffer, info.styleFlagsPtr, cellCount)
-      : null;
-    const linkIds = info.linkIdsPtr
-      ? new Uint32Array(mem.buffer, info.linkIdsPtr, cellCount)
-      : null;
-    const fgBytes = info.fgPtr
-      ? new Uint8Array(mem.buffer, info.fgPtr, cellCount * 4)
-      : null;
-    const bgBytes = info.bgPtr
-      ? new Uint8Array(mem.buffer, info.bgPtr, cellCount * 4)
-      : null;
-    const ulBytes = info.ulPtr
-      ? new Uint8Array(mem.buffer, info.ulPtr, cellCount * 4)
-      : null;
-    const ulStyle = info.ulStylePtr
-      ? new Uint8Array(mem.buffer, info.ulStylePtr, cellCount)
-      : null;
+    const cache = this.getRenderViewCache(handle);
+    const buffer = mem.buffer;
+    const codepoints = getCachedView(
+      cache.codepoints,
+      buffer,
+      info.codepointsPtr,
+      cellCount,
+      Uint32Array,
+    );
+    const contentTags = getCachedView(
+      cache.contentTags,
+      buffer,
+      info.contentTagsPtr,
+      cellCount,
+      Uint8Array,
+    );
+    const wide = getCachedView(cache.wide, buffer, info.widePtr, cellCount, Uint8Array);
+    const cellFlags = getCachedView(cache.cellFlags, buffer, info.flagsPtr, cellCount, Uint16Array);
+    const styleFlags = getCachedView(
+      cache.styleFlags,
+      buffer,
+      info.styleFlagsPtr,
+      cellCount,
+      Uint16Array,
+    );
+    const linkIds = getCachedView(cache.linkIds, buffer, info.linkIdsPtr, cellCount, Uint32Array);
+    const fgBytes = getCachedView(cache.fgBytes, buffer, info.fgPtr, cellCount * 4, Uint8Array);
+    const bgBytes = getCachedView(cache.bgBytes, buffer, info.bgPtr, cellCount * 4, Uint8Array);
+    const ulBytes = getCachedView(cache.ulBytes, buffer, info.ulPtr, cellCount * 4, Uint8Array);
+    const ulStyle = getCachedView(cache.ulStyle, buffer, info.ulStylePtr, cellCount, Uint8Array);
     const linkCount = this.exports.restty_link_count ? this.exports.restty_link_count(handle) : 0;
-    const linkOffsets = linkCount && this.exports.restty_link_offsets_ptr
-      ? new Uint32Array(mem.buffer, this.exports.restty_link_offsets_ptr(handle), linkCount)
-      : null;
-    const linkLengths = linkCount && this.exports.restty_link_lengths_ptr
-      ? new Uint32Array(mem.buffer, this.exports.restty_link_lengths_ptr(handle), linkCount)
-      : null;
+    const linkOffsetsPtr =
+      linkCount && this.exports.restty_link_offsets_ptr
+        ? this.exports.restty_link_offsets_ptr(handle)
+        : 0;
+    const linkLengthsPtr =
+      linkCount && this.exports.restty_link_lengths_ptr
+        ? this.exports.restty_link_lengths_ptr(handle)
+        : 0;
+    const linkOffsets = getCachedView(
+      cache.linkOffsets,
+      buffer,
+      linkOffsetsPtr,
+      linkCount,
+      Uint32Array,
+    );
+    const linkLengths = getCachedView(
+      cache.linkLengths,
+      buffer,
+      linkLengthsPtr,
+      linkCount,
+      Uint32Array,
+    );
     const linkBufferLen = this.exports.restty_link_buffer_len
       ? this.exports.restty_link_buffer_len(handle)
       : 0;
-    const linkBuffer = linkBufferLen && this.exports.restty_link_buffer_ptr
-      ? new Uint8Array(mem.buffer, this.exports.restty_link_buffer_ptr(handle), linkBufferLen)
-      : null;
-    const graphemeOffset = info.graphemeOffsetPtr
-      ? new Uint32Array(mem.buffer, info.graphemeOffsetPtr, cellCount)
-      : null;
-    const graphemeLen = info.graphemeLenPtr
-      ? new Uint32Array(mem.buffer, info.graphemeLenPtr, cellCount)
-      : null;
-    const graphemeBuffer =
-      info.graphemeBufferPtr && info.graphemeBufferLen
-        ? new Uint32Array(mem.buffer, info.graphemeBufferPtr, info.graphemeBufferLen)
-        : null;
-    const selectionStart = info.selectionStartPtr
-      ? new Int16Array(mem.buffer, info.selectionStartPtr, rows)
-      : null;
-    const selectionEnd = info.selectionEndPtr
-      ? new Int16Array(mem.buffer, info.selectionEndPtr, rows)
-      : null;
-    const cursorBytes = info.cursorPtr
-      ? new Uint8Array(mem.buffer, info.cursorPtr, 16)
-      : null;
-    const cursor = cursorBytes ? unpackCursor(cursorBytes, info.cursorPtr) : null;
+    const linkBufferPtr =
+      linkBufferLen && this.exports.restty_link_buffer_ptr
+        ? this.exports.restty_link_buffer_ptr(handle)
+        : 0;
+    const linkBuffer = getCachedView(
+      cache.linkBuffer,
+      buffer,
+      linkBufferPtr,
+      linkBufferLen,
+      Uint8Array,
+    );
+    const graphemeOffset = getCachedView(
+      cache.graphemeOffset,
+      buffer,
+      info.graphemeOffsetPtr,
+      cellCount,
+      Uint32Array,
+    );
+    const graphemeLen = getCachedView(
+      cache.graphemeLen,
+      buffer,
+      info.graphemeLenPtr,
+      cellCount,
+      Uint32Array,
+    );
+    const graphemeBuffer = getCachedView(
+      cache.graphemeBuffer,
+      buffer,
+      info.graphemeBufferPtr,
+      info.graphemeBufferLen,
+      Uint32Array,
+    );
+    const selectionStart = getCachedView(
+      cache.selectionStart,
+      buffer,
+      info.selectionStartPtr,
+      rows,
+      Int16Array,
+    );
+    const selectionEnd = getCachedView(
+      cache.selectionEnd,
+      buffer,
+      info.selectionEndPtr,
+      rows,
+      Int16Array,
+    );
+    const cursor = info.cursorPtr ? unpackCursor(buffer, info.cursorPtr) : null;
 
     return {
       rows,

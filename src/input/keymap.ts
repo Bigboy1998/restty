@@ -127,7 +127,7 @@ const SHIFTED_CODE_BY_CODE: Record<string, string> = {
   BracketRight: "}",
   Backslash: "|",
   Semicolon: ":",
-  Quote: "\"",
+  Quote: '"',
   Comma: "<",
   Period: ">",
   Slash: "?",

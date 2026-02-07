@@ -20,10 +20,7 @@ export function setPreedit(
   }
 }
 
-export function clearPreedit(
-  state: ImeState,
-  imeInput?: HTMLInputElement | null,
-): void {
+export function clearPreedit(state: ImeState, imeInput?: HTMLInputElement | null): void {
   state.preedit = "";
   state.selectionStart = 0;
   state.selectionEnd = 0;

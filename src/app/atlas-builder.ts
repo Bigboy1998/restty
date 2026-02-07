@@ -28,10 +28,7 @@ type BuildAtlasDeps = {
   fontScaleOverrides: Array<{ match: RegExp; scale: number }>;
   sizeMode: string;
   isSymbolFont: (entry: any) => boolean;
-  fontScaleOverride: (
-    entry: any,
-    overrides: Array<{ match: RegExp; scale: number }>,
-  ) => number;
+  fontScaleOverride: (entry: any, overrides: Array<{ match: RegExp; scale: number }>) => number;
   resolveGlyphPixelMode: (entry: any) => number;
   atlasBitmapToRGBA: (atlas: any) => Uint8Array | null;
   padAtlasRGBA: (rgba: Uint8Array, atlas: any, padding: number) => Uint8Array;
@@ -79,9 +76,7 @@ export type BuildFontAtlasResult = {
   preferNearest: boolean;
 };
 
-export function buildFontAtlasIfNeeded(
-  params: BuildFontAtlasParams,
-): BuildFontAtlasResult {
+export function buildFontAtlasIfNeeded(params: BuildFontAtlasParams): BuildFontAtlasResult {
   const {
     entry,
     neededGlyphIds,
@@ -127,15 +122,9 @@ export function buildFontAtlasIfNeeded(
     entry.atlasScale !== (atlasScale || 1);
 
   const isSymbol = isSymbolFont(entry);
-  const constraintSignature = isSymbol
-    ? nerdConstraintSignature(glyphMeta, constraintContext)
-    : "";
+  const constraintSignature = isSymbol ? nerdConstraintSignature(glyphMeta, constraintContext) : "";
 
-  if (
-    !needsRebuild &&
-    isSymbol &&
-    (entry.constraintSignature ?? "") !== constraintSignature
-  ) {
+  if (!needsRebuild && isSymbol && (entry.constraintSignature ?? "") !== constraintSignature) {
     needsRebuild = true;
   }
 
@@ -185,22 +174,13 @@ export function buildFontAtlasIfNeeded(
   const atlasPadding = isSymbol
     ? Math.max(constants.atlasPadding, constants.symbolAtlasPadding)
     : constants.atlasPadding;
-  const atlasMaxSize = isSymbol
-    ? constants.symbolAtlasMaxSize
-    : constants.defaultAtlasMaxSize;
+  const atlasMaxSize = isSymbol ? constants.symbolAtlasMaxSize : constants.defaultAtlasMaxSize;
   const glyphPixelMode = resolveGlyphPixelMode(entry);
-  const colorGlyphAtlas =
-    glyphPixelMode === constants.pixelModeRgbaValue || glyphPixelMode === 4;
+  const colorGlyphAtlas = glyphPixelMode === constants.pixelModeRgbaValue || glyphPixelMode === 4;
   const useCanvasColorAtlas = colorGlyphAtlas;
 
   let atlas = null;
-  if (
-    isSymbol &&
-    rasterizeGlyph &&
-    rasterizeGlyphWithTransform &&
-    constraintContext &&
-    glyphMeta
-  ) {
+  if (isSymbol && rasterizeGlyph && rasterizeGlyphWithTransform && constraintContext && glyphMeta) {
     const result = buildGlyphAtlasWithConstraints({
       font: entry.font,
       glyphIds: [...union],
@@ -267,9 +247,7 @@ export function buildFontAtlasIfNeeded(
     return { rebuilt: false, atlas: null, rgba: null, preferNearest: false };
   }
 
-  const colorGlyphs = colorGlyphAtlas
-    ? new Set<number>(atlas.glyphs.keys())
-    : undefined;
+  const colorGlyphs = colorGlyphAtlas ? new Set<number>(atlas.glyphs.keys()) : undefined;
   atlas.colorGlyphs = colorGlyphs;
 
   let rgba = atlasBitmapToRGBA(atlas);

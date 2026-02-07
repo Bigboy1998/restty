@@ -148,9 +148,7 @@ export type InputHandler = {
   filterOutput: (output: string) => string;
   setReplySink: (fn: (data: string) => void) => void;
   setCursorProvider: (fn: () => CursorPosition) => void;
-  setPositionToCell: (
-    fn: (event: MouseEvent | PointerEvent | WheelEvent) => CellPosition,
-  ) => void;
+  setPositionToCell: (fn: (event: MouseEvent | PointerEvent | WheelEvent) => CellPosition) => void;
   setPositionToPixel: (
     fn: (event: MouseEvent | PointerEvent | WheelEvent) => { x: number; y: number },
   ) => void;

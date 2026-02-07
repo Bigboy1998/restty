@@ -1,6 +1,4 @@
-export function parseCodepointInput(
-  value: string | null | undefined,
-): number | null {
+export function parseCodepointInput(value: string | null | undefined): number | null {
   if (!value) return null;
   const trimmed = value.trim();
   if (!trimmed) return null;

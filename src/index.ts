@@ -191,9 +191,7 @@ export {
 export type { GhosttyTheme, ThemeColor, ResttyBuiltinThemeName } from "./theme";
 
 // App / high-level integration
-export {
-  createResttyApp,
-} from "./app";
+export { createResttyApp } from "./app";
 export type {
   ResttyApp,
   ResttyAppOptions,

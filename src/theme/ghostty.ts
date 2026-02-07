@@ -127,7 +127,7 @@ export function colorToFloats(
   color: ThemeColor,
   alphaOverride?: number,
 ): [number, number, number, number] {
-  const a = alphaOverride ?? (color.a ?? 255);
+  const a = alphaOverride ?? color.a ?? 255;
   return [color.r / 255, color.g / 255, color.b / 255, a / 255];
 }
 

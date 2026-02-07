@@ -198,9 +198,7 @@ export class OutputFilter {
   private handleWindowOp(seq: string) {
     const match = /^\x1b\[([0-9;]*)t$/.exec(seq);
     if (!match) return false;
-    const params = match[1]
-      ? match[1].split(";").map((part) => Number(part))
-      : [];
+    const params = match[1] ? match[1].split(";").map((part) => Number(part)) : [];
     const op = params[0] ?? 0;
     const metrics = this.getWindowMetrics?.();
 

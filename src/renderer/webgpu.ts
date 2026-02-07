@@ -37,14 +37,7 @@ export async function initWebGPU(canvas: HTMLCanvasElement): Promise<WebGPUState
   const srgbSwapchain = format.endsWith("-srgb");
 
   // Quad vertices for instanced rendering
-  const quadVertices = new Float32Array([
-    0, 0,
-    1, 0,
-    0, 1,
-    0, 1,
-    1, 0,
-    1, 1,
-  ]);
+  const quadVertices = new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]);
   const vertexBuffer = device.createBuffer({
     size: quadVertices.byteLength,
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
@@ -211,7 +204,6 @@ export async function initWebGPU(canvas: HTMLCanvasElement): Promise<WebGPUState
     primitive: { topology: "triangle-list", cullMode: "none" },
   });
 
-
   // Rect bind group
   const rectBindGroup = device.createBindGroup({
     layout: rectPipeline.getBindGroupLayout(0),
@@ -243,7 +235,11 @@ export async function initWebGPU(canvas: HTMLCanvasElement): Promise<WebGPUState
   };
 }
 
-function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader | null {
+function compileShader(
+  gl: WebGL2RenderingContext,
+  type: number,
+  source: string,
+): WebGLShader | null {
   const shader = gl.createShader(type);
   if (!shader) return null;
   gl.shaderSource(shader, source);
@@ -256,7 +252,11 @@ function compileShader(gl: WebGL2RenderingContext, type: number, source: string)
   return shader;
 }
 
-function createProgram(gl: WebGL2RenderingContext, vertSrc: string, fragSrc: string): WebGLProgram | null {
+function createProgram(
+  gl: WebGL2RenderingContext,
+  vertSrc: string,
+  fragSrc: string,
+): WebGLProgram | null {
   const vert = compileShader(gl, gl.VERTEX_SHADER, vertSrc);
   const frag = compileShader(gl, gl.FRAGMENT_SHADER, fragSrc);
   if (!vert || !frag) return null;

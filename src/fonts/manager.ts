@@ -150,10 +150,7 @@ export function fontAdvanceUnits(
   return advance;
 }
 
-export function glyphWidthUnits(
-  entry: FontEntry,
-  glyphId: number | undefined | null,
-): number {
+export function glyphWidthUnits(entry: FontEntry, glyphId: number | undefined | null): number {
   if (!entry?.font || glyphId === undefined || glyphId === null) return 0;
   if (!entry.boundsCache) entry.boundsCache = new Map();
   if (entry.boundsCache.has(glyphId)) return entry.boundsCache.get(glyphId)!;
@@ -177,8 +174,7 @@ function isSymbolCp(cp: number): boolean {
     (cp >= 0x100000 && cp <= 0x10fffd);
   const isBoxDrawing = cp >= 0x2500 && cp <= 0x257f;
   const isBlockElement = cp >= 0x2580 && cp <= 0x259f;
-  const isLegacyComputing =
-    (cp >= 0x1fb00 && cp <= 0x1fbff) || (cp >= 0x1cc00 && cp <= 0x1cebf);
+  const isLegacyComputing = (cp >= 0x1fb00 && cp <= 0x1fbff) || (cp >= 0x1cc00 && cp <= 0x1cebf);
   const isPowerline = cp >= 0xe0b0 && cp <= 0xe0d7;
   const isGraphicsElement = isBoxDrawing || isBlockElement || isLegacyComputing || isPowerline;
   return isPrivateUse || isGraphicsElement;
@@ -199,9 +195,7 @@ export function pickFontIndexForText(
   const chars = Array.from(text);
   const primary = state.fonts[0];
   const primaryHeight = primary?.font ? fontHeightUnits(primary.font) : 0;
-  const primaryAdvance = primary
-    ? fontAdvanceUnits(primary, shapeClusterWithFont)
-    : 0;
+  const primaryAdvance = primary ? fontAdvanceUnits(primary, shapeClusterWithFont) : 0;
   const primaryRatio = primaryHeight > 0 ? primaryAdvance / primaryHeight : 0.5;
   const targetRatio = primaryRatio * expectedSpan;
   const firstCp = text.codePointAt(0) ?? 0;
@@ -280,7 +274,8 @@ export async function tryLocalFontBuffer(matchers: string[]): Promise<ArrayBuffe
   try {
     const fonts = await (navigator as any).queryLocalFonts();
     const match = fonts.find((font: any) => {
-      const name = `${font.family ?? ""} ${font.fullName ?? ""} ${font.postscriptName ?? ""}`.toLowerCase();
+      const name =
+        `${font.family ?? ""} ${font.fullName ?? ""} ${font.postscriptName ?? ""}`.toLowerCase();
       return matchers.some((matcher) => name.includes(matcher));
     });
     if (match) {

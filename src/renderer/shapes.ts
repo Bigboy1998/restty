@@ -74,11 +74,25 @@ export function applyAlpha(color: Color, alpha: number): Color {
 }
 
 // Rect push helpers
-export function pushRect(out: RectData, x: number, y: number, w: number, h: number, color: Color): void {
+export function pushRect(
+  out: RectData,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  color: Color,
+): void {
   out.push(x, y, w, h, color[0], color[1], color[2], color[3]);
 }
 
-export function pushRectSnapped(out: RectData, x: number, y: number, w: number, h: number, color: Color): void {
+export function pushRectSnapped(
+  out: RectData,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  color: Color,
+): void {
   const x0 = Math.floor(x);
   const y0 = Math.floor(y);
   const x1 = Math.ceil(x + w);
@@ -89,7 +103,14 @@ export function pushRectSnapped(out: RectData, x: number, y: number, w: number, 
   out.push(x0, y0, width, height, color[0], color[1], color[2], color[3]);
 }
 
-export function pushRectBox(out: RectData, x: number, y: number, w: number, h: number, color: Color): void {
+export function pushRectBox(
+  out: RectData,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  color: Color,
+): void {
   const x0 = Math.round(x);
   const y0 = Math.round(y);
   const width = Math.max(1, Math.round(w));
@@ -129,10 +150,12 @@ export function drawBlockElement(
   out: RectData,
 ): boolean {
   const full = () => pushRectSnapped(out, x, y, cellW, cellH, color);
-  const lower = (fraction: number) => fillFrac(out, x, y, cellW, cellH, 0, 1, 1 - fraction, 1, color);
+  const lower = (fraction: number) =>
+    fillFrac(out, x, y, cellW, cellH, 0, 1, 1 - fraction, 1, color);
   const upper = (fraction: number) => fillFrac(out, x, y, cellW, cellH, 0, 1, 0, fraction, color);
   const left = (fraction: number) => fillFrac(out, x, y, cellW, cellH, 0, fraction, 0, 1, color);
-  const right = (fraction: number) => fillFrac(out, x, y, cellW, cellH, 1 - fraction, 1, 0, 1, color);
+  const right = (fraction: number) =>
+    fillFrac(out, x, y, cellW, cellH, 1 - fraction, 1, 0, 1, color);
 
   switch (cp) {
     case 0x2580:
@@ -307,16 +330,22 @@ export function drawBoxDrawing(
       const s = 0.25;
 
       const cubicBezier = (
-        x0: number, y0: number,
-        cx1: number, cy1: number,
-        cx2: number, cy2: number,
-        x1: number, y1: number
+        x0: number,
+        y0: number,
+        cx1: number,
+        cy1: number,
+        cx2: number,
+        cy2: number,
+        x1: number,
+        y1: number,
       ) => {
         for (let i = 0; i <= steps; i++) {
           const t = i / steps;
           const mt = 1 - t;
-          const px = mt * mt * mt * x0 + 3 * mt * mt * t * cx1 + 3 * mt * t * t * cx2 + t * t * t * x1;
-          const py = mt * mt * mt * y0 + 3 * mt * mt * t * cy1 + 3 * mt * t * t * cy2 + t * t * t * y1;
+          const px =
+            mt * mt * mt * x0 + 3 * mt * mt * t * cx1 + 3 * mt * t * t * cx2 + t * t * t * x1;
+          const py =
+            mt * mt * mt * y0 + 3 * mt * mt * t * cy1 + 3 * mt * t * t * cy2 + t * t * t * y1;
           pushRectBox(out, px - halfThick, py - halfThick, thickness, thickness, color);
         }
       };
@@ -325,41 +354,30 @@ export function drawBoxDrawing(
         // ╭: curve from (cx, cy+r) to (cx+r, cy), control points toward center
         pushRectBox(out, cx - halfThick, cy + r, thickness, y + cellH - (cy + r), color);
         cubicBezier(
-          cx, cy + r,           // start: below center
-          cx, cy + s * r,       // C1: above start, toward center
-          cx + s * r, cy,       // C2: left of end, toward center
-          cx + r, cy            // end: right of center
+          cx,
+          cy + r, // start: below center
+          cx,
+          cy + s * r, // C1: above start, toward center
+          cx + s * r,
+          cy, // C2: left of end, toward center
+          cx + r,
+          cy, // end: right of center
         );
         pushRectBox(out, cx + r, cy - halfThick, x + cellW - (cx + r), thickness, color);
       } else if (corner === "bl") {
         // ╮: curve from (cx, cy+r) to (cx-r, cy)
         pushRectBox(out, cx - halfThick, cy + r, thickness, y + cellH - (cy + r), color);
-        cubicBezier(
-          cx, cy + r,
-          cx, cy + s * r,
-          cx - s * r, cy,
-          cx - r, cy
-        );
+        cubicBezier(cx, cy + r, cx, cy + s * r, cx - s * r, cy, cx - r, cy);
         pushRectBox(out, x, cy - halfThick, cx - r - x, thickness, color);
       } else if (corner === "tl") {
         // ╯: curve from (cx, cy-r) to (cx-r, cy)
         pushRectBox(out, cx - halfThick, y, thickness, cy - r - y, color);
-        cubicBezier(
-          cx, cy - r,
-          cx, cy - s * r,
-          cx - s * r, cy,
-          cx - r, cy
-        );
+        cubicBezier(cx, cy - r, cx, cy - s * r, cx - s * r, cy, cx - r, cy);
         pushRectBox(out, x, cy - halfThick, cx - r - x, thickness, color);
       } else {
         // ╰: curve from (cx, cy-r) to (cx+r, cy)
         pushRectBox(out, cx - halfThick, y, thickness, cy - r - y, color);
-        cubicBezier(
-          cx, cy - r,
-          cx, cy - s * r,
-          cx + s * r, cy,
-          cx + r, cy
-        );
+        cubicBezier(cx, cy - r, cx, cy - s * r, cx + s * r, cy, cx + r, cy);
         pushRectBox(out, cx + r, cy - halfThick, x + cellW - (cx + r), thickness, color);
       }
     };
@@ -505,10 +523,7 @@ export function drawBraille(
 
   const dotW = Math.max(1, Math.round(cellW * 0.18));
   const dotH = Math.max(1, Math.round(cellH * 0.18));
-  const colX = [
-    x + cellW * 0.25 - dotW * 0.5,
-    x + cellW * 0.75 - dotW * 0.5,
-  ];
+  const colX = [x + cellW * 0.25 - dotW * 0.5, x + cellW * 0.75 - dotW * 0.5];
   const rowY = [
     y + cellH * 0.125 - dotH * 0.5,
     y + cellH * 0.375 - dotH * 0.5,
