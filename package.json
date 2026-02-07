@@ -50,7 +50,9 @@
     "playground": "bun run playground/dev-server.ts",
     "playground:static": "bun run playground/server.ts"
   },
-  "dependencies": {},
+  "dependencies": {
+    "text-shaper": "^0.1.17"
+  },
   "devDependencies": {
     "@webgpu/types": "^0.1.69",
     "oxfmt": "^0.28.0",

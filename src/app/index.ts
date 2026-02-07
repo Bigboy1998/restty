@@ -61,7 +61,8 @@ import {
   type GlyphConstraintMeta,
   type AtlasConstraintContext,
 } from "./atlas-builder";
-import type { ResttyApp, ResttyAppOptions } from "./types";
+import * as bundledTextShaper from "text-shaper";
+import type { ResttyApp, ResttyAppOptions, TextShaper } from "./types";
 export type {
   TextShaper,
   ResttyAppElements,
@@ -72,12 +73,10 @@ export type {
 } from "./types";
 
 export function createResttyApp(options: ResttyAppOptions): ResttyApp {
-  const { canvas: canvasInput, imeInput: imeInputInput, textShaper, elements, callbacks } = options;
+  const { canvas: canvasInput, imeInput: imeInputInput, elements, callbacks } = options;
+  const textShaper = (options.textShaper ?? bundledTextShaper) as TextShaper;
   if (!canvasInput) {
     throw new Error("createResttyApp requires a canvas element");
-  }
-  if (!textShaper) {
-    throw new Error("createResttyApp requires a textShaper implementation");
   }
   const {
     Font,

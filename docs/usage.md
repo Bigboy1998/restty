@@ -17,39 +17,34 @@ Open `http://localhost:5173`, then connect to `ws://localhost:8787/pty` from the
 
 `createResttyApp` is the primary integration surface in this repo.
 
+Simple usage (built-in `text-shaper` is used by default):
+
 ```ts
 import { createResttyApp } from "restty";
-import {
-  Font,
-  UnicodeBuffer,
-  shape,
-  glyphBufferToShapedGlyphs,
-  buildAtlas,
-  atlasToRGBA,
-  rasterizeGlyph,
-  rasterizeGlyphWithTransform,
-  PixelMode,
-} from "./text-shaper.js";
 
 const app = createResttyApp({
   canvas: document.getElementById("screen") as HTMLCanvasElement,
   imeInput: document.getElementById("imeInput") as HTMLTextAreaElement | null,
-  textShaper: {
-    Font,
-    UnicodeBuffer,
-    shape,
-    glyphBufferToShapedGlyphs,
-    buildAtlas,
-    atlasToRGBA,
-    rasterizeGlyph,
-    rasterizeGlyphWithTransform,
-    PixelMode,
-  },
   renderer: "auto", // "auto" | "webgpu" | "webgl2"
 });
 
 await app.init();
 app.connectPty("ws://localhost:8787/pty");
+```
+
+Advanced override (inject your own `textShaper` implementation):
+
+```ts
+import { createResttyApp } from "restty";
+import * as textShaper from "text-shaper";
+
+const app = createResttyApp({
+  canvas: document.getElementById("screen") as HTMLCanvasElement,
+  textShaper: {
+    ...textShaper,
+    // Optional overrides/hooks can go here.
+  },
+});
 ```
 
 Useful methods:

@@ -33,6 +33,30 @@ restty combines a Zig/WASM VT engine, modern browser rendering pipelines, and a 
 - Integration and usage: `docs/usage.md`
 - Internal architecture notes: `docs/internals/`
 
+## App integration
+
+Simple usage (built-in `text-shaper` is used automatically):
+
+```ts
+import { createResttyApp } from "restty";
+
+const app = createResttyApp({
+  canvas: document.getElementById("screen") as HTMLCanvasElement,
+});
+```
+
+Advanced usage (override `textShaper` explicitly):
+
+```ts
+import { createResttyApp } from "restty";
+import * as textShaper from "text-shaper";
+
+const app = createResttyApp({
+  canvas: document.getElementById("screen") as HTMLCanvasElement,
+  textShaper,
+});
+```
+
 ## Repository layout
 
 - `src/` - Main library/runtime code (renderer, input, PTY bridge, app integration).

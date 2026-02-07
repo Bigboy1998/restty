@@ -85,7 +85,7 @@ export type FontSource = {
 export type ResttyAppOptions = {
   canvas: HTMLCanvasElement;
   imeInput?: HTMLTextAreaElement | null;
-  textShaper: TextShaper;
+  textShaper?: TextShaper;
   elements?: ResttyAppElements;
   callbacks?: ResttyAppCallbacks;
   renderer?: "auto" | "webgpu" | "webgl2";
