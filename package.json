@@ -1,6 +1,6 @@
 {
   "name": "restty",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "Browser terminal rendering library powered by WASM, WebGPU/WebGL2, and TypeScript text shaping.",
   "keywords": [
     "terminal",
