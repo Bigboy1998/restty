@@ -19,6 +19,11 @@ let sharedWebContainerPromise: Promise<WebContainer> | null = null;
 const WEB_CONTAINER_WELCOME = (() => {
   const ESC = "\x1b";
   const CSI = `${ESC}[`;
+  const OSC = `${ESC}]`;
+  const ST = `${ESC}\\`;
+  const githubUrl = "https://github.com/wiedymi/restty";
+  const githubLabel = `${CSI}4;38;5;81m${githubUrl}${CSI}0m`;
+  const githubLink = `${OSC}8;;${githubUrl}${ST}${githubLabel}${OSC}8;;${ST}`;
   const lines = [
     "",
     `${CSI}1;38;5;81m██████╗ ███████╗███████╗████████╗████████╗██╗   ██╗${CSI}0m`,
@@ -29,7 +34,7 @@ const WEB_CONTAINER_WELCOME = (() => {
     `${CSI}1;38;5;219m╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝      ╚═╝      ╚═╝   ${CSI}0m`,
     "",
     `${CSI}1mWelcome to restty WebContainer mode${CSI}0m`,
-    `GitHub: ${CSI}4;38;5;81mhttps://github.com/wiedymi/restty${CSI}0m`,
+    `GitHub: ${githubLink}`,
     "",
     `${CSI}38;5;117mTry:${CSI}0m node demo.js`,
     `${CSI}38;5;117mTry:${CSI}0m node test.js`,

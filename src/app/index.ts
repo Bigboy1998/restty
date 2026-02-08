@@ -1792,7 +1792,6 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
       if (
         !selectionState.active &&
         event.button === 0 &&
-        (event.metaKey || event.ctrlKey) &&
         linkState.hoverUri
       ) {
         openLink(linkState.hoverUri);

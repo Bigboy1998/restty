@@ -49582,6 +49582,17 @@ function eG($) {
 }
 
 // src/app/index.ts
+function normalizeTouchSelectionMode(value) {
+  if (value === "drag" || value === "long-press" || value === "off")
+    return value;
+  return "long-press";
+}
+function clampFiniteNumber(value, fallback, min, max, round = false) {
+  if (!Number.isFinite(value))
+    return fallback;
+  const numeric = round ? Math.round(value) : Number(value);
+  return Math.min(max, Math.max(min, numeric));
+}
 function createResttyApp(options) {
   const { canvas: canvasInput, imeInput: imeInputInput, elements, callbacks } = options;
   const session = options.session ?? getDefaultResttyAppSession();
@@ -49604,6 +49615,12 @@ function createResttyApp(options) {
   const attachCanvasEvents = options.attachCanvasEvents ?? true;
   const autoResize = options.autoResize ?? true;
   const debugExpose = options.debugExpose ?? false;
+  const touchSelectionMode = normalizeTouchSelectionMode(options.touchSelectionMode);
+  const touchSelectionLongPressMs = clampFiniteNumber(options.touchSelectionLongPressMs, 450, 120, 2000, true);
+  const touchSelectionMoveThresholdPx = clampFiniteNumber(options.touchSelectionMoveThresholdPx, 10, 1, 64);
+  const hasCoarsePointer = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(any-pointer: coarse)").matches;
+  const hasTouchPoints = typeof navigator !== "undefined" && navigator.maxTouchPoints > 0;
+  const showOverlayScrollbar = !(hasCoarsePointer || hasTouchPoints);
   const nerdIconScale = Number.isFinite(options.nerdIconScale) ? Number(options.nerdIconScale) : 1;
   const alphaBlending = options.alphaBlending ?? "linear-corrected";
   const srgbChannelToLinear = (c3) => c3 <= 0.04045 ? c3 / 12.92 : Math.pow((c3 + 0.055) / 1.055, 2.4);
@@ -49805,6 +49822,17 @@ function createResttyApp(options) {
     anchor: null,
     focus: null
   };
+  const touchSelectionState = {
+    pendingPointerId: null,
+    activePointerId: null,
+    panPointerId: null,
+    pendingCell: null,
+    pendingStartedAt: 0,
+    pendingStartX: 0,
+    pendingStartY: 0,
+    panLastY: 0,
+    pendingTimer: 0
+  };
   const linkState = {
     hoverId: 0,
     hoverUri: ""
@@ -49816,6 +49844,10 @@ function createResttyApp(options) {
     lastOffset: 0,
     lastLen: 0
   };
+  const scrollbarDragState = {
+    pointerId: null,
+    thumbGrabRatio: 0.5
+  };
   const KITTY_FLAG_REPORT_EVENTS2 = 1 << 1;
   function updateCanvasCursor() {
     if (!canvas)
@@ -49826,8 +49858,199 @@ function createResttyApp(options) {
     }
     canvas.style.cursor = linkState.hoverId ? "pointer" : "default";
   }
+  function isTouchPointer(event) {
+    return event.pointerType === "touch";
+  }
+  function clearPendingTouchSelection() {
+    if (touchSelectionState.pendingTimer) {
+      clearTimeout(touchSelectionState.pendingTimer);
+      touchSelectionState.pendingTimer = 0;
+    }
+    touchSelectionState.pendingPointerId = null;
+    touchSelectionState.pendingCell = null;
+    touchSelectionState.pendingStartedAt = 0;
+  }
+  function tryActivatePendingTouchSelection(pointerId) {
+    if (touchSelectionMode !== "long-press")
+      return false;
+    if (touchSelectionState.pendingPointerId !== pointerId || !touchSelectionState.pendingCell) {
+      return false;
+    }
+    if (performance.now() - touchSelectionState.pendingStartedAt < touchSelectionLongPressMs) {
+      return false;
+    }
+    const pendingCell = touchSelectionState.pendingCell;
+    clearPendingTouchSelection();
+    beginSelectionDrag(pendingCell, pointerId);
+    return true;
+  }
+  function beginSelectionDrag(cell, pointerId) {
+    selectionState.active = true;
+    selectionState.dragging = true;
+    selectionState.anchor = cell;
+    selectionState.focus = cell;
+    touchSelectionState.activePointerId = pointerId;
+    touchSelectionState.panPointerId = null;
+    canvas.setPointerCapture?.(pointerId);
+    updateCanvasCursor();
+    needsRender = true;
+  }
   function noteScrollActivity() {
     scrollbarState.lastInputAt = performance.now();
+  }
+  function getViewportScrollOffset() {
+    if (!wasmHandle || !wasmExports?.restty_scrollbar_offset)
+      return 0;
+    return wasmExports.restty_scrollbar_offset(wasmHandle) || 0;
+  }
+  function shiftSelectionByRows(deltaRows) {
+    if (!deltaRows)
+      return;
+    if (!selectionState.active && !selectionState.dragging)
+      return;
+    if (!selectionState.anchor || !selectionState.focus)
+      return;
+    const maxAbs = Math.max(1024, (gridState.rows || 24) * 128);
+    selectionState.anchor = {
+      row: clamp(selectionState.anchor.row + deltaRows, -maxAbs, maxAbs),
+      col: selectionState.anchor.col
+    };
+    selectionState.focus = {
+      row: clamp(selectionState.focus.row + deltaRows, -maxAbs, maxAbs),
+      col: selectionState.focus.col
+    };
+    needsRender = true;
+  }
+  function scrollViewportByLines(lines) {
+    if (!wasmReady || !wasmHandle || !gridState.cellH)
+      return;
+    scrollRemainder += lines;
+    const delta = Math.trunc(scrollRemainder);
+    scrollRemainder -= delta;
+    if (!delta)
+      return;
+    const beforeOffset = getViewportScrollOffset();
+    wasm.scrollViewport(wasmHandle, delta);
+    const afterOffset = getViewportScrollOffset();
+    shiftSelectionByRows(beforeOffset - afterOffset);
+    if (linkState.hoverId)
+      updateLinkHover(null);
+    wasm.renderUpdate(wasmHandle);
+    needsRender = true;
+    noteScrollActivity();
+  }
+  function setViewportScrollOffset(nextOffset) {
+    if (!wasmReady || !wasmHandle || !wasmExports?.restty_scrollbar_total)
+      return;
+    const total = wasmExports.restty_scrollbar_total(wasmHandle) || 0;
+    const len = wasmExports.restty_scrollbar_len ? wasmExports.restty_scrollbar_len(wasmHandle) : 0;
+    const current = wasmExports.restty_scrollbar_offset ? wasmExports.restty_scrollbar_offset(wasmHandle) : 0;
+    const maxOffset = Math.max(0, total - len);
+    const clamped = clamp(Math.round(nextOffset), 0, maxOffset);
+    const delta = clamped - current;
+    if (!delta)
+      return;
+    const beforeOffset = getViewportScrollOffset();
+    wasm.scrollViewport(wasmHandle, delta);
+    const afterOffset = getViewportScrollOffset();
+    shiftSelectionByRows(beforeOffset - afterOffset);
+    if (linkState.hoverId)
+      updateLinkHover(null);
+    wasm.renderUpdate(wasmHandle);
+    needsRender = true;
+    noteScrollActivity();
+  }
+  function pointerToCanvasPx(event) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = rect.width > 0 ? canvas.width / rect.width : 1;
+    const scaleY = rect.height > 0 ? canvas.height / rect.height : 1;
+    return {
+      x: (event.clientX - rect.left) * scaleX,
+      y: (event.clientY - rect.top) * scaleY
+    };
+  }
+  function computeOverlayScrollbarLayout(rows, cellW, cellH, total, offset, len) {
+    if (!(total > len && len > 0))
+      return null;
+    const trackHeight = rows * cellH;
+    const width = Math.max(10, Math.round(cellW * 0.9));
+    const margin = Math.max(6, Math.round(width * 0.5));
+    const insetY = Math.max(2, Math.round(cellH * 0.2));
+    const trackX = canvas.width - margin - width;
+    const trackY = insetY;
+    const trackH = Math.max(width, trackHeight - insetY * 2);
+    const denom = Math.max(1, total - len);
+    const thumbH = Math.max(width, Math.round(trackH * (len / total)));
+    const thumbY = trackY + Math.round(offset / denom * (trackH - thumbH));
+    return { total, offset, len, denom, width, trackX, trackY, trackH, thumbY, thumbH };
+  }
+  function getOverlayScrollbarLayout() {
+    if (!showOverlayScrollbar || !wasmExports?.restty_scrollbar_total || !wasmHandle)
+      return null;
+    if (!gridState.rows || !gridState.cellW || !gridState.cellH)
+      return null;
+    const total = wasmExports.restty_scrollbar_total(wasmHandle) || 0;
+    const offset = wasmExports.restty_scrollbar_offset ? wasmExports.restty_scrollbar_offset(wasmHandle) : 0;
+    const len = wasmExports.restty_scrollbar_len ? wasmExports.restty_scrollbar_len(wasmHandle) : gridState.rows;
+    return computeOverlayScrollbarLayout(gridState.rows, gridState.cellW, gridState.cellH, total, offset, len);
+  }
+  function isPointInScrollbarHitArea(layout, x3, y) {
+    const hitPadX = Math.max(3, Math.round(layout.width * 0.35));
+    return x3 >= layout.trackX - hitPadX && x3 <= layout.trackX + layout.width + hitPadX && y >= layout.trackY && y <= layout.trackY + layout.trackH;
+  }
+  function isPointInScrollbarThumb(layout, x3, y) {
+    return x3 >= layout.trackX && x3 <= layout.trackX + layout.width && y >= layout.thumbY && y <= layout.thumbY + layout.thumbH;
+  }
+  function scrollbarOffsetForPointerY(layout, pointerY, thumbGrabRatio) {
+    const thumbTop = pointerY - layout.thumbH * thumbGrabRatio;
+    const trackSpan = Math.max(1, layout.trackH - layout.thumbH);
+    const ratio = clamp((thumbTop - layout.trackY) / trackSpan, 0, 1);
+    return Math.round(ratio * layout.denom);
+  }
+  function pushRoundedVerticalBar(out, x3, y, w, h, color) {
+    const x02 = Math.round(x3);
+    const y02 = Math.round(y);
+    const width = Math.max(1, Math.round(w));
+    const height = Math.max(1, Math.round(h));
+    const radius = Math.min(Math.floor(width * 0.5), Math.floor(height * 0.5));
+    if (radius <= 0) {
+      pushRectBox(out, x02, y02, width, height, color);
+      return;
+    }
+    const middleH = height - radius * 2;
+    if (middleH > 0) {
+      pushRectBox(out, x02, y02 + radius, width, middleH, color);
+    }
+    const radiusSq = radius * radius;
+    for (let row = 0;row < radius; row += 1) {
+      const dy = radius - row - 0.5;
+      const inset = Math.max(0, Math.floor(radius - Math.sqrt(Math.max(0, radiusSq - dy * dy))));
+      const rowW = width - inset * 2;
+      if (rowW <= 0)
+        continue;
+      pushRectBox(out, x02 + inset, y02 + row, rowW, 1, color);
+      pushRectBox(out, x02 + inset, y02 + height - 1 - row, rowW, 1, color);
+    }
+  }
+  function appendOverlayScrollbar(overlayData, rows, cellW, cellH, total, offset, len) {
+    if (!showOverlayScrollbar)
+      return;
+    const layout = computeOverlayScrollbarLayout(rows, cellW, cellH, total, offset, len);
+    if (!layout)
+      return;
+    const since = performance.now() - scrollbarState.lastInputAt;
+    const fadeDelay = 160;
+    const fadeDuration = 520;
+    let alpha = 0;
+    if (since < fadeDelay) {
+      alpha = 0.68;
+    } else if (since < fadeDelay + fadeDuration) {
+      alpha = 0.68 * (1 - (since - fadeDelay) / fadeDuration);
+    }
+    if (alpha <= 0.01)
+      return;
+    const thumbColor = [0.96, 0.96, 0.96, alpha * 0.75];
+    pushRoundedVerticalBar(overlayData, layout.trackX, layout.thumbY, layout.width, layout.thumbH, thumbColor);
   }
   function releaseKittyImage(entry) {
     const source = entry?.source;
@@ -50426,6 +50649,7 @@ function createResttyApp(options) {
     selectionState.dragging = false;
     selectionState.anchor = null;
     selectionState.focus = null;
+    touchSelectionState.activePointerId = null;
     updateCanvasCursor();
     needsRender = true;
   }
@@ -50639,10 +50863,54 @@ function createResttyApp(options) {
   function bindCanvasEvents() {
     if (!attachCanvasEvents)
       return;
+    canvas.style.touchAction = touchSelectionMode === "long-press" || touchSelectionMode === "drag" ? "none" : "pan-y pinch-zoom";
     const onPointerDown = (event) => {
+      if (!isTouchPointer(event) && event.button === 0) {
+        const layout = getOverlayScrollbarLayout();
+        if (layout) {
+          const point = pointerToCanvasPx(event);
+          if (isPointInScrollbarHitArea(layout, point.x, point.y)) {
+            event.preventDefault();
+            noteScrollActivity();
+            const hitThumb = isPointInScrollbarThumb(layout, point.x, point.y);
+            scrollbarDragState.pointerId = event.pointerId;
+            scrollbarDragState.thumbGrabRatio = hitThumb ? clamp((point.y - layout.thumbY) / Math.max(1, layout.thumbH), 0, 1) : 0.5;
+            const targetOffset = scrollbarOffsetForPointerY(layout, point.y, scrollbarDragState.thumbGrabRatio);
+            setViewportScrollOffset(targetOffset);
+            canvas.setPointerCapture?.(event.pointerId);
+            return;
+          }
+        }
+      }
       if (inputHandler.sendMouseEvent("down", event)) {
         event.preventDefault();
         canvas.setPointerCapture?.(event.pointerId);
+        return;
+      }
+      if (isTouchPointer(event)) {
+        if (event.button !== 0)
+          return;
+        const cell2 = normalizeSelectionCell(positionToCell(event));
+        touchSelectionState.activePointerId = null;
+        touchSelectionState.panPointerId = null;
+        if (touchSelectionMode === "off")
+          return;
+        if (touchSelectionMode === "drag") {
+          event.preventDefault();
+          beginSelectionDrag(cell2, event.pointerId);
+          return;
+        }
+        clearPendingTouchSelection();
+        touchSelectionState.pendingPointerId = event.pointerId;
+        touchSelectionState.pendingCell = cell2;
+        touchSelectionState.pendingStartedAt = performance.now();
+        touchSelectionState.pendingStartX = event.clientX;
+        touchSelectionState.pendingStartY = event.clientY;
+        touchSelectionState.panPointerId = event.pointerId;
+        touchSelectionState.panLastY = event.clientY;
+        touchSelectionState.pendingTimer = setTimeout(() => {
+          tryActivatePendingTouchSelection(event.pointerId);
+        }, touchSelectionLongPressMs);
         return;
       }
       if (event.button !== 0)
@@ -50650,17 +50918,59 @@ function createResttyApp(options) {
       event.preventDefault();
       const cell = normalizeSelectionCell(positionToCell(event));
       updateLinkHover(cell);
-      selectionState.active = true;
-      selectionState.dragging = true;
-      selectionState.anchor = cell;
-      selectionState.focus = cell;
-      canvas.setPointerCapture?.(event.pointerId);
-      updateCanvasCursor();
-      needsRender = true;
+      beginSelectionDrag(cell, event.pointerId);
     };
     const onPointerMove = (event) => {
+      if (scrollbarDragState.pointerId === event.pointerId) {
+        const layout = getOverlayScrollbarLayout();
+        if (!layout) {
+          scrollbarDragState.pointerId = null;
+          return;
+        }
+        const point = pointerToCanvasPx(event);
+        const targetOffset = scrollbarOffsetForPointerY(layout, point.y, scrollbarDragState.thumbGrabRatio);
+        setViewportScrollOffset(targetOffset);
+        event.preventDefault();
+        return;
+      }
       if (inputHandler.sendMouseEvent("move", event)) {
         event.preventDefault();
+        return;
+      }
+      if (isTouchPointer(event)) {
+        if (touchSelectionState.pendingPointerId === event.pointerId) {
+          const dx = event.clientX - touchSelectionState.pendingStartX;
+          const dy = event.clientY - touchSelectionState.pendingStartY;
+          if (dx * dx + dy * dy >= touchSelectionMoveThresholdPx * touchSelectionMoveThresholdPx) {
+            clearPendingTouchSelection();
+          } else {
+            tryActivatePendingTouchSelection(event.pointerId);
+          }
+          if (touchSelectionState.pendingPointerId === event.pointerId) {
+            if (touchSelectionMode === "long-press" && touchSelectionState.panPointerId === event.pointerId) {
+              const deltaPx = touchSelectionState.panLastY - event.clientY;
+              touchSelectionState.panLastY = event.clientY;
+              scrollViewportByLines(deltaPx / Math.max(1, gridState.cellH) * 1.5);
+              event.preventDefault();
+            }
+            return;
+          }
+        }
+        if (selectionState.dragging && touchSelectionState.activePointerId === event.pointerId) {
+          const cell2 = normalizeSelectionCell(positionToCell(event));
+          event.preventDefault();
+          selectionState.focus = cell2;
+          updateLinkHover(null);
+          updateCanvasCursor();
+          needsRender = true;
+          return;
+        }
+        if (touchSelectionMode === "long-press" && touchSelectionState.panPointerId === event.pointerId) {
+          const deltaPx = touchSelectionState.panLastY - event.clientY;
+          touchSelectionState.panLastY = event.clientY;
+          scrollViewportByLines(deltaPx / Math.max(1, gridState.cellH) * 1.5);
+          event.preventDefault();
+        }
         return;
       }
       const cell = normalizeSelectionCell(positionToCell(event));
@@ -50675,8 +50985,39 @@ function createResttyApp(options) {
       needsRender = true;
     };
     const onPointerUp = (event) => {
+      if (scrollbarDragState.pointerId === event.pointerId) {
+        scrollbarDragState.pointerId = null;
+        event.preventDefault();
+        return;
+      }
       if (inputHandler.sendMouseEvent("up", event)) {
         event.preventDefault();
+        return;
+      }
+      if (isTouchPointer(event)) {
+        if (touchSelectionState.pendingPointerId === event.pointerId) {
+          clearPendingTouchSelection();
+          touchSelectionState.activePointerId = null;
+          touchSelectionState.panPointerId = null;
+          return;
+        }
+        if (selectionState.dragging && touchSelectionState.activePointerId === event.pointerId) {
+          const cell2 = normalizeSelectionCell(positionToCell(event));
+          event.preventDefault();
+          selectionState.dragging = false;
+          selectionState.focus = cell2;
+          touchSelectionState.activePointerId = null;
+          if (selectionState.anchor && selectionState.focus && selectionState.anchor.row === selectionState.focus.row && selectionState.anchor.col === selectionState.focus.col) {
+            clearSelection();
+          } else {
+            updateCanvasCursor();
+            needsRender = true;
+          }
+          return;
+        }
+        if (touchSelectionState.panPointerId === event.pointerId) {
+          touchSelectionState.panPointerId = null;
+        }
         return;
       }
       const cell = normalizeSelectionCell(positionToCell(event));
@@ -50693,8 +51034,29 @@ function createResttyApp(options) {
       } else {
         updateLinkHover(cell);
       }
-      if (!selectionState.active && event.button === 0 && (event.metaKey || event.ctrlKey) && linkState.hoverUri) {
+      if (!selectionState.active && event.button === 0 && linkState.hoverUri) {
         openLink(linkState.hoverUri);
+      }
+    };
+    const onPointerCancel = (event) => {
+      if (scrollbarDragState.pointerId === event.pointerId) {
+        scrollbarDragState.pointerId = null;
+      }
+      if (isTouchPointer(event)) {
+        if (touchSelectionState.pendingPointerId === event.pointerId) {
+          clearPendingTouchSelection();
+        }
+        if (touchSelectionState.panPointerId === event.pointerId) {
+          touchSelectionState.panPointerId = null;
+        }
+        if (touchSelectionState.activePointerId === event.pointerId) {
+          touchSelectionState.activePointerId = null;
+          if (selectionState.dragging) {
+            selectionState.dragging = false;
+            updateCanvasCursor();
+            needsRender = true;
+          }
+        }
       }
     };
     const onWheel = (event) => {
@@ -50717,16 +51079,7 @@ function createResttyApp(options) {
       } else {
         lines = event.deltaY / gridState.cellH;
       }
-      lines *= speed;
-      scrollRemainder += lines;
-      const delta = Math.trunc(scrollRemainder);
-      scrollRemainder -= delta;
-      if (!delta)
-        return;
-      wasm.scrollViewport(wasmHandle, delta);
-      wasm.renderUpdate(wasmHandle);
-      needsRender = true;
-      noteScrollActivity();
+      scrollViewportByLines(lines * speed);
       event.preventDefault();
     };
     const onContextMenu = (event) => {
@@ -50739,6 +51092,7 @@ function createResttyApp(options) {
     canvas.addEventListener("pointerdown", onPointerDown);
     canvas.addEventListener("pointermove", onPointerMove);
     canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerCancel);
     canvas.addEventListener("pointerleave", onPointerLeave);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("contextmenu", onContextMenu);
@@ -50746,9 +51100,12 @@ function createResttyApp(options) {
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerCancel);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onContextMenu);
+      clearPendingTouchSelection();
+      scrollbarDragState.pointerId = null;
     });
     if (imeInput) {
       let suppressNextInput = false;
@@ -52891,7 +53248,9 @@ function createResttyApp(options) {
     const startRow = forward ? a3.row : f.row;
     const endRow = forward ? f.row : a3.row;
     const lines = [];
-    for (let row = startRow;row <= endRow; row += 1) {
+    const clampedStartRow = clamp(startRow, 0, rows - 1);
+    const clampedEndRow = clamp(endRow, 0, rows - 1);
+    for (let row = clampedStartRow;row <= clampedEndRow; row += 1) {
       const range = selectionForRow(row, cols);
       if (!range)
         continue;
@@ -53018,8 +53377,6 @@ function createResttyApp(options) {
       graphemeOffset,
       graphemeLen,
       graphemeBuffer,
-      selectionStart,
-      selectionEnd,
       cursor
     } = render;
     if (!codepoints || !fgBytes)
@@ -53210,13 +53567,9 @@ function createResttyApp(options) {
     for (let row = 0;row < rows; row += 1) {
       const rowY = row * cellH;
       const baseY = rowY + yPad + baselineOffset;
-      let selStart = selectionStart ? selectionStart[row] : -1;
-      let selEnd = selectionEnd ? selectionEnd[row] : -1;
       const localSel = selectionState.active ? selectionForRow(row, cols) : null;
-      if (localSel) {
-        selStart = localSel.start;
-        selEnd = localSel.end;
-      }
+      const selStart = localSel?.start ?? -1;
+      const selEnd = localSel?.end ?? -1;
       if (selStart >= 0 && selEnd > selStart) {
         const start = Math.max(0, selStart);
         const end = Math.min(cols, selEnd);
@@ -53724,36 +54077,8 @@ function createResttyApp(options) {
         scrollbarState.lastTotal = total;
         scrollbarState.lastOffset = offset;
         scrollbarState.lastLen = len;
-        noteScrollActivity();
       }
-      if (total > len && len > 0) {
-        const now = performance.now();
-        const since = now - scrollbarState.lastInputAt;
-        const fadeDelay = 600;
-        const fadeDuration = 700;
-        let alpha = 0;
-        if (offset > 0) {
-          alpha = 0.65;
-        } else if (since < fadeDelay) {
-          alpha = 0.5;
-        } else if (since < fadeDelay + fadeDuration) {
-          alpha = 0.5 * (1 - (since - fadeDelay) / fadeDuration);
-        }
-        if (alpha > 0.01) {
-          const trackH = rows * cellH;
-          const scrollbarWidth = Math.max(2, Math.round(cellW * 0.12));
-          const margin = Math.max(2, Math.round(cellW * 0.2));
-          const trackX = canvas.width - margin - scrollbarWidth;
-          const trackY = 0;
-          const denom = Math.max(1, total - len);
-          const thumbH = Math.max(cellH * 1.5, Math.round(trackH * (len / total)));
-          const thumbY = Math.round(offset / denom * (trackH - thumbH));
-          const thumbColor = [1, 1, 1, alpha * 0.35];
-          const trackColor = [1, 1, 1, alpha * 0.08];
-          pushRectBox(overlayData, trackX, trackY, scrollbarWidth, trackH, trackColor);
-          pushRectBox(overlayData, trackX, thumbY, scrollbarWidth, thumbH, thumbColor);
-        }
-      }
+      appendOverlayScrollbar(overlayData, rows, cellW, cellH, total, offset, len);
     }
     webgpuUniforms[0] = canvas.width;
     webgpuUniforms[1] = canvas.height;
@@ -53929,8 +54254,6 @@ function createResttyApp(options) {
       graphemeOffset,
       graphemeLen,
       graphemeBuffer,
-      selectionStart,
-      selectionEnd,
       cursor
     } = render;
     if (!codepoints || !fgBytes) {
@@ -54108,13 +54431,9 @@ function createResttyApp(options) {
     for (let row = 0;row < rows; row += 1) {
       const rowY = row * cellH;
       const baseY = rowY + yPad + baselineOffset;
-      let selStart = selectionStart ? selectionStart[row] : -1;
-      let selEnd = selectionEnd ? selectionEnd[row] : -1;
       const localSel = selectionState.active ? selectionForRow(row, cols) : null;
-      if (localSel) {
-        selStart = localSel.start;
-        selEnd = localSel.end;
-      }
+      const selStart = localSel?.start ?? -1;
+      const selEnd = localSel?.end ?? -1;
       if (selStart >= 0 && selEnd > selStart) {
         const start = Math.max(0, selStart);
         const end = Math.min(cols, selEnd);
@@ -54448,36 +54767,8 @@ function createResttyApp(options) {
         scrollbarState.lastTotal = total;
         scrollbarState.lastOffset = offset;
         scrollbarState.lastLen = len;
-        noteScrollActivity();
       }
-      if (total > len && len > 0) {
-        const now = performance.now();
-        const since = now - scrollbarState.lastInputAt;
-        const fadeDelay = 600;
-        const fadeDuration = 700;
-        let alpha = 0;
-        if (offset > 0) {
-          alpha = 0.65;
-        } else if (since < fadeDelay) {
-          alpha = 0.5;
-        } else if (since < fadeDelay + fadeDuration) {
-          alpha = 0.5 * (1 - (since - fadeDelay) / fadeDuration);
-        }
-        if (alpha > 0.01) {
-          const trackH = rows * cellH;
-          const scrollbarWidth = Math.max(2, Math.round(cellW * 0.12));
-          const margin = Math.max(2, Math.round(cellW * 0.2));
-          const trackX = canvas.width - margin - scrollbarWidth;
-          const trackY = 0;
-          const denom = Math.max(1, total - len);
-          const thumbH = Math.max(cellH * 1.5, Math.round(trackH * (len / total)));
-          const thumbY = Math.round(offset / denom * (trackH - thumbH));
-          const thumbColor = [1, 1, 1, alpha * 0.35];
-          const trackColor = [1, 1, 1, alpha * 0.08];
-          pushRectBox(overlayData, trackX, trackY, scrollbarWidth, trackH, trackColor);
-          pushRectBox(overlayData, trackX, thumbY, scrollbarWidth, thumbH, thumbColor);
-        }
-      }
+      appendOverlayScrollbar(overlayData, rows, cellW, cellH, total, offset, len);
     }
     for (const [fontIndex, neededIds] of neededGlyphIdsByFont.entries()) {
       const fontEntry = fontState.fonts[fontIndex];
@@ -54853,9 +55144,11 @@ function createResttyApp(options) {
       }
       appendLog(`[key] ${JSON.stringify(normalized)}${before}`);
     }
-    if (source === "key" && selectionState.active) {
+    if (source !== "program" && (selectionState.active || selectionState.dragging)) {
       clearSelection();
     }
+    if (source === "pty" && linkState.hoverId)
+      updateLinkHover(null);
     writeToWasm(wasmHandle, normalized);
     flushWasmOutputToPty();
     if (source === "pty" && inputHandler?.isSynchronizedOutput?.()) {
@@ -56708,6 +57001,11 @@ var sharedWebContainerPromise = null;
 var WEB_CONTAINER_WELCOME = (() => {
   const ESC2 = "\x1B";
   const CSI = `${ESC2}[`;
+  const OSC = `${ESC2}]`;
+  const ST = `${ESC2}\\`;
+  const githubUrl = "https://github.com/wiedymi/restty";
+  const githubLabel = `${CSI}4;38;5;81m${githubUrl}${CSI}0m`;
+  const githubLink = `${OSC}8;;${githubUrl}${ST}${githubLabel}${OSC}8;;${ST}`;
   const lines = [
     "",
     `${CSI}1;38;5;81m██████╗ ███████╗███████╗████████╗████████╗██╗   ██╗${CSI}0m`,
@@ -56718,7 +57016,7 @@ var WEB_CONTAINER_WELCOME = (() => {
     `${CSI}1;38;5;219m╚═╝  ╚═╝╚══════╝╚══════╝   ╚═╝      ╚═╝      ╚═╝   ${CSI}0m`,
     "",
     `${CSI}1mWelcome to restty WebContainer mode${CSI}0m`,
-    `GitHub: ${CSI}4;38;5;81mhttps://github.com/wiedymi/restty${CSI}0m`,
+    `GitHub: ${githubLink}`,
     "",
     `${CSI}38;5;117mTry:${CSI}0m node demo.js`,
     `${CSI}38;5;117mTry:${CSI}0m node test.js`,
@@ -57025,7 +57323,9 @@ function createWebContainerPtyTransport(options = {}) {
       const commandRaw = options.getCommand?.().trim() || "jsh";
       const spec = parseCommand(commandRaw);
       if (!spec.command) {
-        cb.onError?.("Missing command", ["Provide a shell command for WebContainer (for example: jsh)"]);
+        cb.onError?.("Missing command", [
+          "Provide a shell command for WebContainer (for example: jsh)"
+        ]);
         cb.onDisconnect?.();
         return;
       }
@@ -57860,5 +58160,5 @@ if (firstState) {
 }
 queueResizeAllPanes();
 
-//# debugId=42F66EA62C36202364756E2164756E21
+//# debugId=1ACCC011E3F2B2D664756E2164756E21
 //# sourceMappingURL=app.js.map
