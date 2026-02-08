@@ -384,16 +384,22 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   const touchSelectionState: {
     pendingPointerId: number | null;
     activePointerId: number | null;
+    panPointerId: number | null;
     pendingCell: { row: number; col: number } | null;
+    pendingStartedAt: number;
     pendingStartX: number;
     pendingStartY: number;
+    panLastY: number;
     pendingTimer: number;
   } = {
     pendingPointerId: null,
     activePointerId: null,
+    panPointerId: null,
     pendingCell: null,
+    pendingStartedAt: 0,
     pendingStartX: 0,
     pendingStartY: 0,
+    panLastY: 0,
     pendingTimer: 0,
   };
 
@@ -431,6 +437,21 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     }
     touchSelectionState.pendingPointerId = null;
     touchSelectionState.pendingCell = null;
+    touchSelectionState.pendingStartedAt = 0;
+  }
+
+  function tryActivatePendingTouchSelection(pointerId: number) {
+    if (touchSelectionMode !== "long-press") return false;
+    if (touchSelectionState.pendingPointerId !== pointerId || !touchSelectionState.pendingCell) {
+      return false;
+    }
+    if (performance.now() - touchSelectionState.pendingStartedAt < touchSelectionLongPressMs) {
+      return false;
+    }
+    const pendingCell = touchSelectionState.pendingCell;
+    clearPendingTouchSelection();
+    beginSelectionDrag(pendingCell, pointerId);
+    return true;
   }
 
   function beginSelectionDrag(cell: { row: number; col: number }, pointerId: number) {
@@ -439,6 +460,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     selectionState.anchor = cell;
     selectionState.focus = cell;
     touchSelectionState.activePointerId = pointerId;
+    touchSelectionState.panPointerId = null;
     canvas.setPointerCapture?.(pointerId);
     updateCanvasCursor();
     needsRender = true;
@@ -446,6 +468,18 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
 
   function noteScrollActivity() {
     scrollbarState.lastInputAt = performance.now();
+  }
+
+  function scrollViewportByLines(lines: number) {
+    if (!wasmReady || !wasmHandle || !gridState.cellH) return;
+    scrollRemainder += lines;
+    const delta = Math.trunc(scrollRemainder);
+    scrollRemainder -= delta;
+    if (!delta) return;
+    wasm.scrollViewport(wasmHandle, delta);
+    wasm.renderUpdate(wasmHandle);
+    needsRender = true;
+    noteScrollActivity();
   }
 
   function releaseKittyImage(entry: KittyDecodedImage | undefined) {
@@ -1337,7 +1371,10 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
 
   function bindCanvasEvents() {
     if (!attachCanvasEvents) return;
-    canvas.style.touchAction = touchSelectionMode === "drag" ? "none" : "pan-y pinch-zoom";
+    canvas.style.touchAction =
+      touchSelectionMode === "long-press" || touchSelectionMode === "drag"
+        ? "none"
+        : "pan-y pinch-zoom";
     const onPointerDown = (event: PointerEvent) => {
       if (inputHandler.sendMouseEvent("down", event)) {
         event.preventDefault();
@@ -1348,6 +1385,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         if (event.button !== 0) return;
         const cell = normalizeSelectionCell(positionToCell(event));
         touchSelectionState.activePointerId = null;
+        touchSelectionState.panPointerId = null;
 
         if (touchSelectionMode === "off") return;
         if (touchSelectionMode === "drag") {
@@ -1359,18 +1397,13 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         clearPendingTouchSelection();
         touchSelectionState.pendingPointerId = event.pointerId;
         touchSelectionState.pendingCell = cell;
+        touchSelectionState.pendingStartedAt = performance.now();
         touchSelectionState.pendingStartX = event.clientX;
         touchSelectionState.pendingStartY = event.clientY;
+        touchSelectionState.panPointerId = event.pointerId;
+        touchSelectionState.panLastY = event.clientY;
         touchSelectionState.pendingTimer = setTimeout(() => {
-          if (
-            touchSelectionState.pendingPointerId !== event.pointerId ||
-            !touchSelectionState.pendingCell
-          ) {
-            return;
-          }
-          const pendingCell = touchSelectionState.pendingCell;
-          clearPendingTouchSelection();
-          beginSelectionDrag(pendingCell, event.pointerId);
+          tryActivatePendingTouchSelection(event.pointerId);
         }, touchSelectionLongPressMs);
         return;
       }
@@ -1387,11 +1420,21 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         return;
       }
       if (isTouchPointer(event)) {
+        tryActivatePendingTouchSelection(event.pointerId);
         if (touchSelectionState.pendingPointerId === event.pointerId) {
           const dx = event.clientX - touchSelectionState.pendingStartX;
           const dy = event.clientY - touchSelectionState.pendingStartY;
           if (dx * dx + dy * dy >= touchSelectionMoveThresholdPx * touchSelectionMoveThresholdPx) {
             clearPendingTouchSelection();
+          }
+          if (
+            touchSelectionMode === "long-press" &&
+            touchSelectionState.panPointerId === event.pointerId
+          ) {
+            const deltaPx = touchSelectionState.panLastY - event.clientY;
+            touchSelectionState.panLastY = event.clientY;
+            scrollViewportByLines((deltaPx / Math.max(1, gridState.cellH)) * 1.5);
+            event.preventDefault();
           }
           return;
         }
@@ -1402,6 +1445,16 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
           updateLinkHover(null);
           updateCanvasCursor();
           needsRender = true;
+          return;
+        }
+        if (
+          touchSelectionMode === "long-press" &&
+          touchSelectionState.panPointerId === event.pointerId
+        ) {
+          const deltaPx = touchSelectionState.panLastY - event.clientY;
+          touchSelectionState.panLastY = event.clientY;
+          scrollViewportByLines((deltaPx / Math.max(1, gridState.cellH)) * 1.5);
+          event.preventDefault();
         }
         return;
       }
@@ -1426,6 +1479,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         if (touchSelectionState.pendingPointerId === event.pointerId) {
           clearPendingTouchSelection();
           touchSelectionState.activePointerId = null;
+          touchSelectionState.panPointerId = null;
           return;
         }
         if (selectionState.dragging && touchSelectionState.activePointerId === event.pointerId) {
@@ -1445,6 +1499,10 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
             updateCanvasCursor();
             needsRender = true;
           }
+          return;
+        }
+        if (touchSelectionState.panPointerId === event.pointerId) {
+          touchSelectionState.panPointerId = null;
         }
         return;
       }
@@ -1482,6 +1540,9 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         if (touchSelectionState.pendingPointerId === event.pointerId) {
           clearPendingTouchSelection();
         }
+        if (touchSelectionState.panPointerId === event.pointerId) {
+          touchSelectionState.panPointerId = null;
+        }
         if (touchSelectionState.activePointerId === event.pointerId) {
           touchSelectionState.activePointerId = null;
           if (selectionState.dragging) {
@@ -1512,15 +1573,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
       } else {
         lines = event.deltaY / gridState.cellH;
       }
-      lines *= speed;
-      scrollRemainder += lines;
-      const delta = Math.trunc(scrollRemainder);
-      scrollRemainder -= delta;
-      if (!delta) return;
-      wasm.scrollViewport(wasmHandle, delta);
-      wasm.renderUpdate(wasmHandle);
-      needsRender = true;
-      noteScrollActivity();
+      scrollViewportByLines(lines * speed);
       event.preventDefault();
     };
 
