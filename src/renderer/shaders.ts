@@ -306,19 +306,19 @@ fn luminance(color: vec3f) -> f32 {
 
 @fragment
 fn fsMain(input: VSOut) -> @location(0) vec4f {
-  let sample = textureSample(atlasTex, atlasSampler, input.uv);
+  let atlasSample = textureSample(atlasTex, atlasSampler, input.uv);
   let useLinear = uniforms.blend.x > 0.5;
   let useCorrection = uniforms.blend.y > 0.5;
 
   if (input.mode > 0.5) {
-    var color = sample;
+    var color = atlasSample;
     if (useLinear) {
       color = vec4f(srgbToLinear3(color.rgb), color.a);
     }
     return vec4f(color.rgb * color.a, color.a);
   }
 
-  var alpha = sample.a;
+  var alpha = atlasSample.a;
 
   var fg = input.color;
   var bg = input.bg;
@@ -424,19 +424,19 @@ fn luminance(color: vec3f) -> f32 {
 
 @fragment
 fn fsMain(input: VSOut) -> @location(0) vec4f {
-  let sample = textureSample(atlasTex, atlasSampler, input.uv);
+  let atlasSample = textureSample(atlasTex, atlasSampler, input.uv);
   let useLinear = uniforms.blend.x > 0.5;
   let useCorrection = uniforms.blend.y > 0.5;
 
   if (input.mode > 0.5) {
-    var color = sample;
+    var color = atlasSample;
     if (useLinear) {
       color = vec4f(srgbToLinear3(color.rgb), color.a);
     }
     return vec4f(color.rgb * color.a, color.a);
   }
 
-  var alpha = sample.a;
+  var alpha = atlasSample.a;
 
   var fg = input.color;
   var bg = input.bg;

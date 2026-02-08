@@ -1,11 +1,5 @@
 import {
-  createResttyApp,
-  createResttyAppSession,
-  createResttyPaneManager,
-  createDefaultResttyPaneContextMenuItems,
-  getResttyShortcutModifierLabel,
-} from "../src/app/index.ts";
-import {
+  Restty,
   createWebSocketPtyTransport,
   listBuiltinThemeNames,
   getBuiltinTheme,
@@ -13,9 +7,9 @@ import {
   type GhosttyTheme,
   type PtyTransport,
   type ResttyFontSource,
+  type ResttyManagedAppPane,
 } from "../src/index.ts";
-import { createDemoController } from "./lib/demos.ts";
-import { parseCodepointInput } from "./lib/codepoint.ts";
+import { createDemoController, type PlaygroundDemoKind } from "./lib/demos.ts";
 import { createWebContainerPtyTransport } from "./lib/webcontainer-pty.ts";
 
 const paneRoot = document.getElementById("paneRoot") as HTMLElement | null;
@@ -25,20 +19,8 @@ if (!paneRoot) {
 
 const backendEl = document.getElementById("backend");
 const fpsEl = document.getElementById("fps");
-const dprEl = document.getElementById("dpr");
-const sizeEl = document.getElementById("size");
-const gridEl = document.getElementById("grid");
-const cellEl = document.getElementById("cell");
 const termSizeEl = document.getElementById("termSize");
-const cursorPosEl = document.getElementById("cursorPos");
-const inputDebugEl = document.getElementById("inputDebug");
-const dbgEl = document.getElementById("dbg");
 const ptyStatusEl = document.getElementById("ptyStatus");
-const mouseStatusEl = document.getElementById("mouseStatus");
-const logEl = document.getElementById("log");
-const logDumpEl = document.getElementById("logDump") as HTMLTextAreaElement | null;
-const atlasInfoEl = document.getElementById("atlasInfo");
-const atlasCanvas = document.getElementById("atlasCanvas") as HTMLCanvasElement | null;
 
 const btnInit = document.getElementById("btnInit");
 const btnPause = document.getElementById("btnPause");
@@ -63,10 +45,6 @@ const fontFamilyLocalSelect = document.getElementById(
 ) as HTMLSelectElement | null;
 const btnLoadLocalFonts = document.getElementById("btnLoadLocalFonts") as HTMLButtonElement | null;
 const fontFamilyHintEl = document.getElementById("fontFamilyHint");
-const atlasCpInput = document.getElementById("atlasCp") as HTMLInputElement | null;
-const atlasBtn = document.getElementById("btnAtlas");
-const btnCopyLog = document.getElementById("btnCopyLog");
-const btnClearLog = document.getElementById("btnClearLog");
 const mouseModeEl = document.getElementById("mouseMode") as HTMLSelectElement | null;
 const settingsFab = document.getElementById("settingsFab") as HTMLButtonElement | null;
 const settingsDialog = document.getElementById("settingsDialog") as HTMLDialogElement | null;
@@ -83,52 +61,6 @@ const FONT_URL_NOTO_SYMBOLS =
   "https://cdn.jsdelivr.net/gh/notofonts/noto-fonts@main/unhinted/ttf/NotoSansSymbols2/NotoSansSymbols2-Regular.ttf";
 const FONT_URL_OPENMOJI =
   "https://cdn.jsdelivr.net/gh/hfg-gmuend/openmoji@master/font/OpenMoji-black-glyf/OpenMoji-black-glyf.ttf";
-const LOG_LIMIT = 200;
-const logBuffer: string[] = [];
-
-function appendLog(line: string) {
-  const timestamp = new Date().toISOString().slice(11, 23);
-  const entry = `${timestamp} ${line}`;
-  logBuffer.push(entry);
-  if (logBuffer.length > LOG_LIMIT) {
-    logBuffer.splice(0, logBuffer.length - LOG_LIMIT);
-  }
-  if (logEl) logEl.textContent = line;
-  if (logDumpEl) {
-    logDumpEl.value = logBuffer.join("\n");
-    logDumpEl.scrollTop = logDumpEl.scrollHeight;
-  }
-}
-
-function isSettingsDialogOpen() {
-  return Boolean(settingsDialog?.open);
-}
-
-function restoreTerminalFocus() {
-  const pane = getFocusedPane() ?? getActivePane() ?? getFirstPane();
-  if (!pane) return;
-  pane.canvas.focus({ preventScroll: true });
-}
-
-function openSettingsDialog() {
-  paneManager?.hideContextMenu();
-  if (!settingsDialog || settingsDialog.open) return;
-  if (typeof settingsDialog.showModal === "function") {
-    settingsDialog.showModal();
-    return;
-  }
-  settingsDialog.setAttribute("open", "");
-}
-
-function closeSettingsDialog() {
-  if (!settingsDialog || !settingsDialog.open) return;
-  if (typeof settingsDialog.close === "function") {
-    settingsDialog.close();
-  } else {
-    settingsDialog.removeAttribute("open");
-  }
-  restoreTerminalFocus();
-}
 
 type RendererChoice = "auto" | "webgpu" | "webgl2";
 type ConnectionBackend = "ws" | "webcontainer";
@@ -136,16 +68,8 @@ type ConnectionBackend = "ws" | "webcontainer";
 type PaneUiState = {
   backend: string;
   fps: string;
-  dpr: string;
-  size: string;
-  grid: string;
-  cell: string;
   termSize: string;
-  cursor: string;
-  inputDebug: string;
-  debug: string;
   ptyStatus: string;
-  mouseStatus: string;
 };
 
 type PaneThemeState = {
@@ -154,33 +78,38 @@ type PaneThemeState = {
   theme: GhosttyTheme | null;
 };
 
-type Pane = {
+type PaneState = {
   id: number;
-  container: HTMLDivElement;
-  canvas: HTMLCanvasElement;
-  imeInput: HTMLTextAreaElement;
-  termDebugEl: HTMLPreElement;
-  focusTarget: HTMLCanvasElement;
-  app: ReturnType<typeof createResttyApp>;
-  demos: ReturnType<typeof createDemoController>;
-  paused: boolean;
-  setPaused?: (value: boolean) => void;
   renderer: RendererChoice;
   fontSize: number;
   mouseMode: string;
+  paused: boolean;
   theme: PaneThemeState;
+  demos: ReturnType<typeof createDemoController> | null;
   ui: PaneUiState;
 };
 
-const sharedSession = createResttyAppSession();
-const panes = new Map<number, Pane>();
+const paneStates = new Map<number, PaneState>();
 let activePaneId: number | null = null;
 let resizeRaf = 0;
-let paneManager: ReturnType<typeof createResttyPaneManager<Pane>> | undefined;
+let restty: Restty;
 
 const initialFontSize = fontSizeInput?.value ? Number(fontSizeInput.value) : 18;
 let selectedFontFamily = fontFamilySelect?.value ?? DEFAULT_FONT_FAMILY;
 let selectedLocalFontMatcher = "";
+
+function setText(el: HTMLElement | null, value: string) {
+  if (el) el.textContent = value;
+}
+
+function isRendererChoice(value: string | null | undefined): value is RendererChoice {
+  return value === "auto" || value === "webgpu" || value === "webgl2";
+}
+
+function parseFontSize(value: string | null | undefined, fallback = 18) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 
 function supportsLocalFontPicker() {
   return typeof window !== "undefined" && "queryLocalFonts" in window;
@@ -209,12 +138,12 @@ function buildFontSourcesForSelection(value: string, localMatcher: string): Rest
       matchers: ["jetbrains mono"],
     });
   }
+
   sources.push({
     type: "url",
     label: "JetBrains Mono",
     url: FONT_URL_JETBRAINS_MONO,
   });
-
   sources.push({
     type: "url",
     label: "Symbols Nerd Font Mono",
@@ -256,18 +185,10 @@ function syncFontFamilyControls() {
 }
 
 async function applyFontSourcesToAllPanes() {
-  const sources = getCurrentFontSources();
-  const updates: Array<Promise<void>> = [];
-  const iterator = panes.values();
-  for (let next = iterator.next(); !next.done; next = iterator.next()) {
-    updates.push(next.value.app.setFontSources(sources));
-  }
-  if (!updates.length) return;
   try {
-    await Promise.all(updates);
-    appendLog(`[ui] font family applied (${selectedFontFamily})`);
+    await restty.setFontSources(getCurrentFontSources());
   } catch (err: any) {
-    appendLog(`[ui] font family apply failed: ${err?.message ?? err}`);
+    console.error("font source apply failed", err);
   }
 }
 
@@ -277,7 +198,7 @@ function upsertDetectedLocalFontOption(family: string) {
   if (!matcher) return;
   const value = `${FONT_FAMILY_LOCAL_PREFIX}${encodeURIComponent(matcher)}`;
   for (let i = 0; i < fontFamilyLocalSelect.options.length; i += 1) {
-    if (fontFamilyLocalSelect.options[i].value === value) return;
+    if (fontFamilyLocalSelect.options[i]?.value === value) return;
   }
   const option = document.createElement("option");
   option.value = value;
@@ -294,7 +215,7 @@ async function detectLocalFonts() {
   try {
     if (fontFamilyLocalSelect) {
       for (let i = fontFamilyLocalSelect.options.length - 1; i >= 0; i -= 1) {
-        if (fontFamilyLocalSelect.options[i].dataset.localDetected === "1") {
+        if (fontFamilyLocalSelect.options[i]?.dataset.localDetected === "1") {
           fontFamilyLocalSelect.remove(i);
         }
       }
@@ -315,14 +236,9 @@ async function detectLocalFonts() {
       fontFamilyLocalSelect.disabled = false;
     }
     setFontFamilyHint(`Detected ${added} local font families.`);
-  } catch (err: any) {
+  } catch {
     setFontFamilyHint("Local font access denied or unavailable.");
-    appendLog(`[ui] local font detect failed: ${err?.message ?? err}`);
   }
-}
-
-function isRendererChoice(value: string | null | undefined): value is RendererChoice {
-  return value === "auto" || value === "webgpu" || value === "webgl2";
 }
 
 function getConnectionBackend(): ConnectionBackend {
@@ -348,18 +264,11 @@ function syncConnectionUi() {
   }
 }
 
-function connectPaneIfNeeded(pane: Pane) {
-  if (getConnectionBackend() !== "webcontainer") return;
-  if (pane.app.isPtyConnected()) return;
-  pane.app.connectPty(getConnectUrl());
-}
-
 function createAdaptivePtyTransport(): PtyTransport {
   const wsTransport = createWebSocketPtyTransport();
   const webContainerTransport = createWebContainerPtyTransport({
     getCommand: () => wcCommandInput?.value?.trim() || "jsh",
     getCwd: () => wcCwdInput?.value?.trim() || "/",
-    onLog: appendLog,
   });
 
   let activeTransport: PtyTransport | null = null;
@@ -399,57 +308,87 @@ function createAdaptivePtyTransport(): PtyTransport {
   };
 }
 
-function parseFontSize(value: string | null | undefined, fallback = 18) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+function isSettingsDialogOpen() {
+  return Boolean(settingsDialog?.open);
+}
+
+function restoreTerminalFocus() {
+  const pane = restty.getFocusedPane() ?? restty.getActivePane() ?? restty.getPanes()[0] ?? null;
+  if (!pane) return;
+  pane.canvas.focus({ preventScroll: true });
+}
+
+function openSettingsDialog() {
+  restty.hideContextMenu();
+  if (!settingsDialog || settingsDialog.open) return;
+  if (typeof settingsDialog.showModal === "function") {
+    settingsDialog.showModal();
+    return;
+  }
+  settingsDialog.setAttribute("open", "");
+}
+
+function closeSettingsDialog() {
+  if (!settingsDialog || !settingsDialog.open) return;
+  if (typeof settingsDialog.close === "function") {
+    settingsDialog.close();
+  } else {
+    settingsDialog.removeAttribute("open");
+  }
+  restoreTerminalFocus();
 }
 
 function createDefaultPaneUi(): PaneUiState {
   return {
     backend: "-",
     fps: "0",
-    dpr: "1",
-    size: "0x0",
-    grid: "0x0",
-    cell: "0x0",
     termSize: "0x0",
-    cursor: "0,0",
-    inputDebug: "-",
-    debug: "-",
     ptyStatus: "disconnected",
-    mouseStatus: "-",
   };
 }
 
-function setText(el: HTMLElement | null, value: string) {
-  if (el) el.textContent = value;
+function createPaneState(id: number, sourcePane: ResttyManagedAppPane | null): PaneState {
+  const sourceState = sourcePane ? paneStates.get(sourcePane.id) : null;
+  return {
+    id,
+    renderer:
+      sourceState?.renderer ??
+      (isRendererChoice(rendererSelect?.value) ? rendererSelect.value : "auto"),
+    fontSize:
+      sourceState?.fontSize ??
+      parseFontSize(fontSizeInput?.value, Number.isFinite(initialFontSize) ? initialFontSize : 18),
+    mouseMode: sourceState?.mouseMode ?? (mouseModeEl?.value || "on"),
+    paused: sourceState?.paused ?? false,
+    theme: sourceState
+      ? {
+          selectValue: sourceState.theme.selectValue,
+          sourceLabel: sourceState.theme.sourceLabel,
+          theme: sourceState.theme.theme,
+        }
+      : {
+          selectValue: defaultThemeName,
+          sourceLabel: defaultThemeName ? "default theme" : "",
+          theme: null,
+        },
+    demos: null,
+    ui: createDefaultPaneUi(),
+  };
 }
 
-function getActivePane(): Pane | null {
-  if (paneManager) {
-    return paneManager.getActivePane();
-  }
+function getActivePane(): ResttyManagedAppPane | null {
+  return restty.getActivePane();
+}
+
+function getActivePaneState(): PaneState | null {
   if (activePaneId === null) return null;
-  return panes.get(activePaneId) ?? null;
+  return paneStates.get(activePaneId) ?? null;
 }
 
-function getFirstPane(): Pane | null {
-  for (const pane of panes.values()) return pane;
-  return null;
+function syncPauseButton(state: PaneState) {
+  if (btnPause) btnPause.textContent = state.paused ? "Resume" : "Pause";
 }
 
-function getFocusedPane(): Pane | null {
-  if (paneManager) {
-    return paneManager.getFocusedPane();
-  }
-  return getActivePane();
-}
-
-function syncPauseButton(pane: Pane) {
-  if (btnPause) btnPause.textContent = pane.paused ? "Resume" : "Pause";
-}
-
-function syncPtyButton(pane: Pane) {
+function syncPtyButton(pane: ResttyManagedAppPane, state: PaneState) {
   if (!ptyBtn) return;
   if (pane.app.isPtyConnected()) {
     ptyBtn.textContent = "Disconnect";
@@ -457,73 +396,68 @@ function syncPtyButton(pane: Pane) {
   }
   ptyBtn.textContent =
     getConnectionBackend() === "webcontainer" ? "Start WebContainer" : "Connect PTY";
+  setText(ptyStatusEl, state.ui.ptyStatus);
 }
 
-function renderActivePaneStatus(pane: Pane) {
-  setText(backendEl, pane.ui.backend);
-  setText(fpsEl, pane.ui.fps);
-  setText(dprEl, pane.ui.dpr);
-  setText(sizeEl, pane.ui.size);
-  setText(gridEl, pane.ui.grid);
-  setText(cellEl, pane.ui.cell);
-  setText(termSizeEl, pane.ui.termSize);
-  setText(cursorPosEl, pane.ui.cursor);
-  setText(inputDebugEl, pane.ui.inputDebug);
-  setText(dbgEl, pane.ui.debug);
-  setText(ptyStatusEl, pane.ui.ptyStatus);
-  setText(mouseStatusEl, pane.ui.mouseStatus);
-  syncPtyButton(pane);
+function renderActivePaneStatus(pane: ResttyManagedAppPane, state: PaneState) {
+  setText(backendEl, state.ui.backend);
+  setText(fpsEl, state.ui.fps);
+  setText(termSizeEl, state.ui.termSize);
+  setText(ptyStatusEl, state.ui.ptyStatus);
+  syncPtyButton(pane, state);
 }
 
-function renderActivePaneControls(pane: Pane) {
-  syncPauseButton(pane);
-  if (rendererSelect) rendererSelect.value = pane.renderer;
-  if (fontSizeInput) fontSizeInput.value = `${pane.fontSize}`;
+function renderActivePaneControls(pane: ResttyManagedAppPane, state: PaneState) {
+  syncPauseButton(state);
+  if (rendererSelect) rendererSelect.value = state.renderer;
+  if (fontSizeInput) fontSizeInput.value = `${state.fontSize}`;
   syncFontFamilyControls();
-  pane.mouseMode = pane.app.getMouseStatus().mode;
+  state.mouseMode = pane.app.getMouseStatus().mode;
   if (mouseModeEl) {
-    const hasOption = Array.from(mouseModeEl.options).some(
-      (option) => option.value === pane.mouseMode,
-    );
-    mouseModeEl.value = hasOption ? pane.mouseMode : "auto";
+    const hasOption = Array.from(mouseModeEl.options).some((option) => option.value === state.mouseMode);
+    mouseModeEl.value = hasOption ? state.mouseMode : "auto";
   }
-  if (themeSelect) themeSelect.value = pane.theme.selectValue;
+  if (themeSelect) themeSelect.value = state.theme.selectValue;
 }
 
-function mutatePane(id: number, update: (pane: Pane) => void) {
-  const pane = panes.get(id);
+function updatePaneUi(id: number, update: (state: PaneState) => void) {
+  const state = paneStates.get(id);
+  if (!state) return;
+  update(state);
+  if (id !== activePaneId) return;
+  const pane = restty.getPaneById(id);
   if (!pane) return;
-  update(pane);
-  if (pane.id === activePaneId) {
-    renderActivePaneStatus(pane);
+  renderActivePaneStatus(pane, state);
+}
+
+function setPanePaused(id: number, value: boolean) {
+  const pane = restty.getPaneById(id);
+  const state = paneStates.get(id);
+  if (!pane || !state) return;
+  state.paused = Boolean(value);
+  pane.paused = state.paused;
+  pane.app.setPaused(state.paused);
+  if (id === activePaneId) {
+    syncPauseButton(state);
   }
 }
 
-function setPanePaused(pane: Pane, value: boolean) {
-  pane.paused = Boolean(value);
-  pane.app.setPaused(pane.paused);
-  if (pane.id === activePaneId) syncPauseButton(pane);
-}
-
-function queueResizeAllPanes() {
-  if (resizeRaf) return;
-  resizeRaf = requestAnimationFrame(() => {
-    resizeRaf = 0;
-    for (const pane of panes.values()) {
-      pane.app.updateSize(true);
-    }
-  });
+function connectPaneIfNeeded(pane: ResttyManagedAppPane) {
+  if (getConnectionBackend() !== "webcontainer") return;
+  if (pane.app.isPtyConnected()) return;
+  pane.app.connectPty(getConnectUrl());
 }
 
 function applyThemeToPane(
-  pane: Pane,
+  pane: ResttyManagedAppPane,
+  state: PaneState,
   theme: GhosttyTheme,
   sourceLabel: string,
   selectValue = "",
 ): boolean {
   try {
     pane.app.applyTheme(theme, sourceLabel);
-    pane.theme = {
+    state.theme = {
       selectValue,
       sourceLabel,
       theme,
@@ -532,24 +466,26 @@ function applyThemeToPane(
       themeSelect.value = selectValue;
     }
     return true;
-  } catch (err: any) {
-    appendLog(`[ui] theme load failed: ${err?.message ?? err}`);
+  } catch (err) {
+    console.error("theme apply failed", err);
     return false;
   }
 }
 
-function applyBuiltinThemeToPane(pane: Pane, name: string, sourceLabel = name): boolean {
+function applyBuiltinThemeToPane(
+  pane: ResttyManagedAppPane,
+  state: PaneState,
+  name: string,
+  sourceLabel = name,
+): boolean {
   const theme = getBuiltinTheme(name);
-  if (!theme) {
-    appendLog(`[ui] theme load failed: unknown theme: ${name}`);
-    return false;
-  }
-  return applyThemeToPane(pane, theme, sourceLabel, name);
+  if (!theme) return false;
+  return applyThemeToPane(pane, state, theme, sourceLabel, name);
 }
 
-function resetThemeForPane(pane: Pane) {
+function resetThemeForPane(pane: ResttyManagedAppPane, state: PaneState) {
   pane.app.resetTheme();
-  pane.theme = {
+  state.theme = {
     selectValue: "",
     sourceLabel: "",
     theme: null,
@@ -557,6 +493,16 @@ function resetThemeForPane(pane: Pane) {
   if (pane.id === activePaneId && themeSelect) {
     themeSelect.value = "";
   }
+}
+
+function queueResizeAllPanes() {
+  if (resizeRaf) return;
+  resizeRaf = requestAnimationFrame(() => {
+    resizeRaf = 0;
+    for (const pane of restty.getPanes()) {
+      pane.app.updateSize(true);
+    }
+  });
 }
 
 function populateThemeSelect(names: string[]) {
@@ -576,219 +522,100 @@ function populateThemeSelect(names: string[]) {
 
 const builtinThemeNames = listBuiltinThemeNames();
 populateThemeSelect(builtinThemeNames);
-appendLog(`[ui] themes loaded (${builtinThemeNames.length})`);
 const defaultThemeName = builtinThemeNames.includes(DEFAULT_THEME_NAME) ? DEFAULT_THEME_NAME : "";
 
-function createPane(id: number, cloneFrom?: Pane | null): Pane {
-  const container = document.createElement("div");
-  container.className = "pane";
-  container.dataset.paneId = `${id}`;
-
-  const canvas = document.createElement("canvas");
-  canvas.className = "pane-canvas";
-  canvas.tabIndex = 0;
-
-  const imeInput = document.createElement("textarea");
-  imeInput.className = "pane-ime-input";
-  imeInput.autocapitalize = "off";
-  imeInput.autocomplete = "off";
-  imeInput.autocorrect = "off";
-  imeInput.spellcheck = false;
-  imeInput.setAttribute("aria-hidden", "true");
-
-  const termDebugEl = document.createElement("pre");
-  termDebugEl.className = "pane-term-debug";
-  termDebugEl.setAttribute("aria-live", "polite");
-
-  container.append(canvas, imeInput, termDebugEl);
-
-  const pane: Pane = {
-    id,
-    container,
-    canvas,
-    imeInput,
-    termDebugEl,
-    focusTarget: canvas,
-    app: null as unknown as ReturnType<typeof createResttyApp>,
-    demos: null as unknown as ReturnType<typeof createDemoController>,
-    paused: false,
-    renderer:
-      cloneFrom?.renderer ??
-      (isRendererChoice(rendererSelect?.value) ? rendererSelect.value : "auto"),
-    fontSize:
-      cloneFrom?.fontSize ??
-      parseFontSize(fontSizeInput?.value, Number.isFinite(initialFontSize) ? initialFontSize : 18),
-    mouseMode: cloneFrom?.mouseMode ?? (mouseModeEl?.value || "on"),
-    theme: cloneFrom
-      ? {
-          selectValue: cloneFrom.theme.selectValue,
-          sourceLabel: cloneFrom.theme.sourceLabel,
-          theme: cloneFrom.theme.theme,
-        }
-      : {
-          selectValue: defaultThemeName,
-          sourceLabel: defaultThemeName ? "default theme" : "",
-          theme: null,
-        },
-    ui: createDefaultPaneUi(),
-  };
-
-  panes.set(id, pane);
-
-  const app = createResttyApp({
-    canvas,
-    imeInput,
-    session: sharedSession,
-    ptyTransport: createAdaptivePtyTransport(),
-    elements: {
-      termDebugEl,
-      atlasInfoEl,
-      atlasCanvas,
-    },
-    debugExpose: true,
-    renderer: pane.renderer,
-    fontSize: pane.fontSize,
-    fontSources: getCurrentFontSources(),
-    callbacks: {
-      onLog: (line) => appendLog(`[pane ${id}] ${line}`),
-      onBackend: (backend) => {
-        mutatePane(id, (target) => {
-          target.ui.backend = backend;
-        });
-      },
-      onFps: (fps) => {
-        mutatePane(id, (target) => {
-          target.ui.fps = `${Math.round(fps)}`;
-        });
-      },
-      onDpr: (dpr) => {
-        mutatePane(id, (target) => {
-          target.ui.dpr = Number.isFinite(dpr) ? dpr.toFixed(2) : "-";
-        });
-      },
-      onCanvasSize: (width, height) => {
-        mutatePane(id, (target) => {
-          target.ui.size = `${width}x${height}`;
-        });
-      },
-      onGridSize: (cols, rows) => {
-        mutatePane(id, (target) => {
-          target.ui.grid = `${cols}x${rows}`;
-        });
-      },
-      onCellSize: (cellW, cellH) => {
-        mutatePane(id, (target) => {
-          target.ui.cell = `${cellW.toFixed(1)}x${cellH.toFixed(1)}`;
-        });
-      },
-      onTermSize: (cols, rows) => {
-        mutatePane(id, (target) => {
-          target.ui.termSize = `${cols}x${rows}`;
-        });
-      },
-      onCursor: (col, row) => {
-        mutatePane(id, (target) => {
-          target.ui.cursor = `${col},${row}`;
-        });
-      },
-      onDebug: (text) => {
-        mutatePane(id, (target) => {
-          target.ui.debug = text;
-        });
-      },
-      onInputDebug: (text) => {
-        mutatePane(id, (target) => {
-          target.ui.inputDebug = text;
-        });
-      },
-      onPtyStatus: (status) => {
-        mutatePane(id, (target) => {
-          target.ui.ptyStatus = status;
-        });
-        const target = panes.get(id);
-        if (target && target.id === activePaneId) {
-          syncPtyButton(target);
-        }
-      },
-      onMouseStatus: (status) => {
-        mutatePane(id, (target) => {
-          target.ui.mouseStatus = status;
-        });
-      },
-    },
-  });
-
-  pane.app = app;
-  pane.demos = createDemoController(app);
-  pane.setPaused = (value: boolean) => {
-    setPanePaused(pane, value);
-  };
-  pane.mouseMode = pane.app.getMouseStatus().mode;
-  pane.ui.ptyStatus = pane.app.isPtyConnected() ? "connected" : "disconnected";
-
-  if (pane.theme.selectValue) {
-    applyBuiltinThemeToPane(
-      pane,
-      pane.theme.selectValue,
-      pane.theme.sourceLabel || pane.theme.selectValue,
-    );
-  } else if (pane.theme.theme) {
-    applyThemeToPane(
-      pane,
-      pane.theme.theme,
-      pane.theme.sourceLabel || "pane theme",
-      pane.theme.selectValue,
-    );
-  }
-
-  pane.app.setMouseMode(pane.mouseMode);
-  void pane.app.init().then(() => {
-    connectPaneIfNeeded(pane);
-  });
-
-  return pane;
-}
-
-const manager = createResttyPaneManager<Pane>({
+restty = new Restty({
   root: paneRoot,
-  createPane: ({ id, sourcePane }) => createPane(id, sourcePane),
-  destroyPane: (pane) => {
-    pane.demos.stop();
-    pane.app.destroy();
-    panes.delete(pane.id);
+  createInitialPane: false,
+  autoInit: false,
+  paneStyles: {
+    inactivePaneOpacity: 0.9,
+  },
+  appOptions: ({ id, sourcePane }) => {
+    const paneState = createPaneState(id, sourcePane);
+    paneStates.set(id, paneState);
+    return {
+      renderer: paneState.renderer,
+      fontSize: paneState.fontSize,
+      fontSources: getCurrentFontSources(),
+      ptyTransport: createAdaptivePtyTransport(),
+      callbacks: {
+        onBackend: (backend) => {
+          updatePaneUi(id, (state) => {
+            state.ui.backend = backend;
+          });
+        },
+        onFps: (fps) => {
+          updatePaneUi(id, (state) => {
+            state.ui.fps = `${Math.round(fps)}`;
+          });
+        },
+        onTermSize: (cols, rows) => {
+          updatePaneUi(id, (state) => {
+            state.ui.termSize = `${cols}x${rows}`;
+          });
+        },
+        onPtyStatus: (status) => {
+          updatePaneUi(id, (state) => {
+            state.ui.ptyStatus = status;
+          });
+        },
+      },
+    };
+  },
+  onPaneCreated: (pane) => {
+    const state = paneStates.get(pane.id);
+    if (!state) return;
+
+    pane.paused = state.paused;
+    pane.setPaused = (value: boolean) => {
+      setPanePaused(pane.id, value);
+    };
+
+    state.demos = createDemoController(pane.app);
+    pane.app.setMouseMode(state.mouseMode);
+
+    if (state.theme.selectValue) {
+      applyBuiltinThemeToPane(pane, state, state.theme.selectValue, state.theme.sourceLabel);
+    } else if (state.theme.theme) {
+      applyThemeToPane(
+        pane,
+        state,
+        state.theme.theme,
+        state.theme.sourceLabel || "pane theme",
+        state.theme.selectValue,
+      );
+    }
+
+    void pane.app.init().then(() => {
+      connectPaneIfNeeded(pane);
+    });
+  },
+  onPaneClosed: (pane) => {
+    const state = paneStates.get(pane.id);
+    state?.demos?.stop();
+    paneStates.delete(pane.id);
   },
   onActivePaneChange: (pane) => {
     activePaneId = pane?.id ?? null;
     if (!pane) return;
-    renderActivePaneStatus(pane);
-    renderActivePaneControls(pane);
-  },
-  onPaneSplit: (sourcePane, createdPane, direction) => {
-    appendLog(`[ui] split ${direction} pane ${sourcePane.id} -> pane ${createdPane.id}`);
-  },
-  onPaneClosed: (pane) => {
-    appendLog(`[ui] closed pane ${pane.id}`);
+    const state = paneStates.get(pane.id);
+    if (!state) return;
+    renderActivePaneStatus(pane, state);
+    renderActivePaneControls(pane, state);
   },
   onLayoutChanged: () => {
     queueResizeAllPanes();
   },
-  contextMenu: {
+  defaultContextMenu: {
     canOpen: () => !isSettingsDialogOpen(),
-    getItems: (pane, manager) =>
-      createDefaultResttyPaneContextMenuItems({
-        pane,
-        manager,
-        modKeyLabel: getResttyShortcutModifierLabel(),
-        getPtyUrl: () => getConnectUrl(),
-      }),
+    getPtyUrl: () => getConnectUrl(),
   },
   shortcuts: {
     enabled: true,
     canHandleEvent: () => !isSettingsDialogOpen(),
-    isAllowedInputTarget: (target) => target.classList.contains("pane-ime-input"),
   },
 });
-paneManager = manager;
 
 settingsFab?.addEventListener("click", () => {
   openSettingsDialog();
@@ -811,11 +638,9 @@ settingsDialog?.addEventListener("cancel", (event) => {
 window.addEventListener(
   "keydown",
   (event) => {
-    if (isSettingsDialogOpen()) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeSettingsDialog();
-      }
+    if (isSettingsDialogOpen() && event.key === "Escape") {
+      event.preventDefault();
+      closeSettingsDialog();
     }
   },
   { capture: true },
@@ -827,26 +652,31 @@ window.addEventListener("resize", () => {
 
 connectionBackendEl?.addEventListener("change", () => {
   syncConnectionUi();
-  for (const pane of panes.values()) {
+  for (const pane of restty.getPanes()) {
     if (pane.app.isPtyConnected()) {
       pane.app.disconnectPty();
     }
   }
   if (getConnectionBackend() === "webcontainer") {
-    for (const pane of panes.values()) {
+    for (const pane of restty.getPanes()) {
       connectPaneIfNeeded(pane);
     }
   }
-  appendLog(`[ui] connection backend: ${getConnectionBackend()}`);
-  const pane = getActivePane();
-  if (pane) syncPtyButton(pane);
+
+  const activePane = getActivePane();
+  const activeState = getActivePaneState();
+  if (activePane && activeState) {
+    syncPtyButton(activePane, activeState);
+  }
 });
 
 btnInit?.addEventListener("click", () => {
   const pane = getActivePane();
   if (!pane) return;
-  setPanePaused(pane, false);
-  pane.demos.stop();
+  const state = getActivePaneState();
+  if (!state) return;
+  setPanePaused(pane.id, false);
+  state.demos?.stop();
   void pane.app.init().then(() => {
     connectPaneIfNeeded(pane);
   });
@@ -855,20 +685,24 @@ btnInit?.addEventListener("click", () => {
 btnPause?.addEventListener("click", () => {
   const pane = getActivePane();
   if (!pane) return;
-  setPanePaused(pane, !pane.paused);
+  const state = getActivePaneState();
+  if (!state) return;
+  setPanePaused(pane.id, !state.paused);
 });
 
 btnClear?.addEventListener("click", () => {
   const pane = getActivePane();
   if (!pane) return;
-  pane.demos.stop();
+  const state = getActivePaneState();
+  if (!state) return;
+  state.demos?.stop();
   pane.app.clearScreen();
 });
 
 btnRunDemo?.addEventListener("click", () => {
-  const pane = getActivePane();
-  if (!pane) return;
-  pane.demos.run(demoSelect?.value ?? "basic");
+  const state = getActivePaneState();
+  if (!state) return;
+  state.demos?.run((demoSelect?.value as PlaygroundDemoKind | string) ?? "basic");
 });
 
 ptyBtn?.addEventListener("click", () => {
@@ -883,29 +717,30 @@ ptyBtn?.addEventListener("click", () => {
 
 rendererSelect?.addEventListener("change", () => {
   const pane = getActivePane();
-  if (!pane) return;
+  const state = getActivePaneState();
+  if (!pane || !state) return;
   const value = rendererSelect.value;
   if (!isRendererChoice(value)) return;
-  pane.renderer = value;
+  state.renderer = value;
   pane.app.setRenderer(value);
 });
 
 if (themeFileInput) {
   themeFileInput.addEventListener("change", () => {
     const pane = getActivePane();
+    const state = getActivePaneState();
     const file = themeFileInput.files?.[0];
-    if (!pane || !file) return;
+    if (!pane || !state || !file) return;
     file
       .text()
       .then((text) => {
         const theme: GhosttyTheme = parseGhosttyTheme(text);
-        if (applyThemeToPane(pane, theme, file.name || "theme file", "") && themeSelect) {
+        if (applyThemeToPane(pane, state, theme, file.name || "theme file", "") && themeSelect) {
           themeSelect.value = "";
         }
       })
-      .catch((err: any) => {
+      .catch((err) => {
         console.error("theme load failed", err);
-        appendLog(`[ui] theme load failed: ${err?.message ?? err}`);
       })
       .finally(() => {
         themeFileInput.value = "";
@@ -916,25 +751,27 @@ if (themeFileInput) {
 if (themeSelect) {
   themeSelect.addEventListener("change", () => {
     const pane = getActivePane();
-    if (!pane) return;
+    const state = getActivePaneState();
+    if (!pane || !state) return;
     const name = themeSelect.value;
     if (!name) {
-      resetThemeForPane(pane);
+      resetThemeForPane(pane, state);
       return;
     }
-    applyBuiltinThemeToPane(pane, name);
+    applyBuiltinThemeToPane(pane, state, name);
   });
 }
 
 if (mouseModeEl) {
   mouseModeEl.addEventListener("change", () => {
     const pane = getActivePane();
-    if (!pane) return;
+    const state = getActivePaneState();
+    if (!pane || !state) return;
     const value = mouseModeEl.value;
     pane.app.setMouseMode(value);
-    pane.mouseMode = pane.app.getMouseStatus().mode;
+    state.mouseMode = pane.app.getMouseStatus().mode;
     if (pane.id === activePaneId) {
-      mouseModeEl.value = pane.mouseMode;
+      mouseModeEl.value = state.mouseMode;
     }
   });
 }
@@ -942,10 +779,11 @@ if (mouseModeEl) {
 if (fontSizeInput) {
   const applyFontSize = () => {
     const pane = getActivePane();
-    if (!pane) return;
+    const state = getActivePaneState();
+    if (!pane || !state) return;
     const value = Number(fontSizeInput.value);
     if (!Number.isFinite(value)) return;
-    pane.fontSize = value;
+    state.fontSize = value;
     pane.app.setFontSize(value);
   };
 
@@ -983,56 +821,6 @@ if (btnLoadLocalFonts) {
   });
 }
 
-if (btnCopyLog) {
-  btnCopyLog.addEventListener("click", async () => {
-    const text = logDumpEl ? logDumpEl.value : "";
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      appendLog("[ui] logs copied");
-    } catch (err: any) {
-      appendLog(`[ui] copy failed: ${err?.message ?? err}`);
-    }
-  });
-}
-
-if (btnClearLog) {
-  btnClearLog.addEventListener("click", () => {
-    logBuffer.length = 0;
-    if (logDumpEl) logDumpEl.value = "";
-    appendLog("[ui] logs cleared");
-  });
-}
-
-if (atlasBtn) {
-  atlasBtn.addEventListener("click", () => {
-    const pane = getActivePane();
-    if (!pane) return;
-    const raw = atlasCpInput?.value ?? "";
-    const cp = parseCodepointInput(raw);
-    if (cp === null) {
-      if (atlasInfoEl) atlasInfoEl.textContent = "invalid codepoint";
-      return;
-    }
-    pane.app.dumpAtlasForCodepoint(cp);
-  });
-}
-
-if (atlasCpInput) {
-  atlasCpInput.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    const pane = getActivePane();
-    if (!pane) return;
-    const raw = atlasCpInput.value;
-    const cp = parseCodepointInput(raw);
-    if (cp === null) {
-      if (atlasInfoEl) atlasInfoEl.textContent = "invalid codepoint";
-      return;
-    }
-    pane.app.dumpAtlasForCodepoint(cp);
-  });
-}
-
 syncConnectionUi();
 syncFontFamilyControls();
 if (supportsLocalFontPicker()) {
@@ -1041,6 +829,11 @@ if (supportsLocalFontPicker()) {
   setFontFamilyHint("Local font picker is not supported in this browser.");
 }
 
-const firstPane = manager.createInitialPane({ focus: true });
+const firstPane = restty.createInitialPane({ focus: true });
 activePaneId = firstPane.id;
+const firstState = paneStates.get(firstPane.id);
+if (firstState) {
+  renderActivePaneStatus(firstPane, firstState);
+  renderActivePaneControls(firstPane, firstState);
+}
 queueResizeAllPanes();

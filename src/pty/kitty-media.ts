@@ -1,12 +1,15 @@
-import { readFileSync as readFileSyncNode } from "node:fs";
+type KittyTerminator = {
+  index: number;
+  len: 1 | 2;
+};
 
-export type KittyBridgeState = {
+export type KittyMediaRewriteState = {
   remainder?: string;
 };
 
-export type KittyBridgeReadFile = (path: string) => Uint8Array;
+export type KittyMediaReadFile = (path: string) => Uint8Array;
 
-function findKittyTerminator(data: string, from: number): { index: number; len: 1 | 2 } | null {
+function findKittyTerminator(data: string, from: number): KittyTerminator | null {
   const bel = data.indexOf("\x07", from);
   const st = data.indexOf("\x1b\\", from);
   if (bel === -1 && st === -1) return null;
@@ -14,24 +17,38 @@ function findKittyTerminator(data: string, from: number): { index: number; len: 
   return { index: st, len: 2 };
 }
 
+function decodeBase64Bytes(text: string): Uint8Array {
+  const cleaned = text.replace(/\s+/g, "");
+  if (!cleaned) return new Uint8Array(0);
+  const binary = atob(cleaned);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    out[i] = binary.charCodeAt(i) & 0xff;
+  }
+  return out;
+}
+
+function encodeBase64Bytes(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i] ?? 0);
+  }
+  return btoa(binary);
+}
+
 function decodeBase64Text(text: string): string {
   try {
-    return Buffer.from(text.replace(/\s+/g, ""), "base64").toString("utf8");
+    const bytes = decodeBase64Bytes(text);
+    return new TextDecoder().decode(bytes);
   } catch {
     return "";
   }
 }
 
-function encodeBase64Bytes(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString("base64");
-}
-
-function rewriteOneKittyCommand(
-  body: string,
-  readFileSync: KittyBridgeReadFile,
-): string {
+function rewriteOneKittyCommand(body: string, readFile: KittyMediaReadFile): string {
   const sep = body.indexOf(";");
   if (sep < 0) return body;
+
   const control = body.slice(0, sep);
   const payload = body.slice(sep + 1);
   if (!control || !payload) return body;
@@ -49,7 +66,7 @@ function rewriteOneKittyCommand(
     }
   }
 
-  // Local file and temp file media need host filesystem access.
+  // Only local file or temp file media need host filesystem access.
   if (medium !== "f" && medium !== "t") return body;
 
   const path = decodeBase64Text(payload);
@@ -57,7 +74,7 @@ function rewriteOneKittyCommand(
 
   let bytes: Uint8Array;
   try {
-    bytes = readFileSync(path);
+    bytes = readFile(path);
   } catch {
     return body;
   }
@@ -69,16 +86,16 @@ function rewriteOneKittyCommand(
   });
   if (!hasMedium) nextParts.push("t=d");
   if (hasMore) {
-    // already normalized by map above
+    // Already normalized by the map above.
   }
 
   return `${nextParts.join(",")};${encodeBase64Bytes(bytes)}`;
 }
 
-export function rewriteKittyMediaToDirect(
+export function rewriteKittyFileMediaToDirect(
   chunk: string,
-  state: KittyBridgeState,
-  readFileSync: KittyBridgeReadFile = (path) => readFileSyncNode(path),
+  state: KittyMediaRewriteState,
+  readFile: KittyMediaReadFile,
 ): string {
   const input = (state.remainder ?? "") + chunk;
   let out = "";
@@ -100,7 +117,7 @@ export function rewriteKittyMediaToDirect(
     }
 
     const body = input.slice(start + 3, terminator.index);
-    const rewritten = rewriteOneKittyCommand(body, readFileSync);
+    const rewritten = rewriteOneKittyCommand(body, readFile);
     out += "\x1b_G";
     out += rewritten;
     out += terminator.len === 2 ? "\x1b\\" : "\x07";

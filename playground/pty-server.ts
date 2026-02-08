@@ -1,4 +1,5 @@
-import { createKittyGraphicsBridge } from "./kitty-graphics-bridge";
+import { readFileSync } from "node:fs";
+import { rewriteKittyFileMediaToDirect } from "../src/pty/kitty-media";
 
 const port = Number(Bun.env.PTY_PORT ?? 8787);
 const defaultShell = Bun.env.SHELL ?? "fish";
@@ -61,19 +62,13 @@ function spawnWithFallbacks(
   ws: ServerWebSocket<PtySocket>,
 ) {
   const errors: string[] = [];
-  const kittyBridge = createKittyGraphicsBridge({
-    trace: Bun.env.WTERM_KITTY_BRIDGE_TRACE === "1",
-  });
-  const bridgeDebug = Bun.env.WTERM_KITTY_BRIDGE_DEBUG === "1";
-  let bridgeRewriteCount = 0;
+  const kittyState = { remainder: "" };
   const decoder = new TextDecoder();
   const handleOutputText = (text: string) => {
     if (!text) return;
-    const rewritten = kittyBridge.transform(text);
-    if (bridgeDebug && rewritten !== text) {
-      bridgeRewriteCount += 1;
-      console.log(`[pty] kitty bridge rewrite #${bridgeRewriteCount}`);
-    }
+    const rewritten = rewriteKittyFileMediaToDirect(text, kittyState, (path) =>
+      new Uint8Array(readFileSync(path)),
+    );
     if (rewritten.length > 0) ws.send(rewritten);
   };
 

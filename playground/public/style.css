@@ -290,24 +290,6 @@ header h1 {
   font-size: 10px;
 }
 
-.atlas-row {
-  display: flex;
-  gap: 6px;
-}
-
-.atlas-info {
-  margin-top: 6px;
-  color: #888;
-  font-size: 10px;
-}
-
-.logs-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
 /* Controls */
 button, select, input[type="text"], input[type="number"] {
   font-family: inherit;
@@ -353,87 +335,4 @@ input[type="file"] {
 
 input:focus, select:focus {
   border-color: #4a9eff;
-}
-
-/* Details/collapsible */
-details.section {
-  padding: 0;
-}
-
-details.section > summary {
-  padding: 8px 12px;
-  cursor: pointer;
-  font-size: 10px;
-  font-weight: 500;
-  color: #666;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-details.section > summary::before {
-  content: "▸";
-  font-size: 9px;
-}
-
-details.section[open] > summary::before {
-  content: "▾";
-}
-
-details.section > summary::-webkit-details-marker {
-  display: none;
-}
-
-details.section > *:not(summary) {
-  padding: 0 12px 10px;
-}
-
-details.section > summary span {
-  color: #444;
-  font-weight: normal;
-  text-transform: none;
-}
-
-/* Debug grid */
-.debug-grid {
-  display: grid;
-  grid-template-columns: 50px 1fr;
-  gap: 2px 8px;
-  font-size: 10px;
-  font-family: "JetBrains Mono", monospace;
-}
-
-.debug-grid > span:nth-child(odd) {
-  color: #555;
-}
-
-.debug-grid > span:nth-child(even) {
-  color: #888;
-}
-
-/* Atlas */
-#atlasCanvas {
-  width: 100%;
-  margin-top: 8px;
-  border: 1px solid #333;
-  image-rendering: pixelated;
-}
-
-/* Log */
-#logDump {
-  width: 100%;
-  height: 100px;
-  margin-top: 6px;
-  padding: 6px;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 9px;
-  background: #111;
-  color: #777;
-  border: 1px solid #222;
-  border-radius: 3px;
-  resize: none;
-  outline: none;
 }

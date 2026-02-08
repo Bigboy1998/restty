@@ -113,7 +113,7 @@ const RESTTY_PANE_STYLE_TEXT = `
   min-height: 0;
   gap: 0;
   padding: 0;
-  background: var(--restty-pane-split-background, #111);
+  background: var(--restty-pane-split-background, #000);
 }
 
 .${RESTTY_PANE_ROOT_CLASS} .pane-split.is-vertical {
@@ -132,7 +132,7 @@ const RESTTY_PANE_STYLE_TEXT = `
   background: var(--restty-pane-background, #000);
   border: 0;
   overflow: hidden;
-  opacity: var(--restty-pane-inactive-opacity, 0.82);
+  opacity: var(--restty-pane-inactive-opacity, 0.9);
   transition: opacity var(--restty-pane-opacity-transition, 140ms) ease-out;
 }
 
@@ -263,9 +263,9 @@ body.is-resizing-split {
 }
 `;
 const DEFAULT_RESTTY_PANE_STYLE_OPTIONS: Required<ResttyPaneStyleOptions> = {
-  splitBackground: "#111",
+  splitBackground: "#000",
   paneBackground: "#000",
-  inactivePaneOpacity: 0.82,
+  inactivePaneOpacity: 0.9,
   activePaneOpacity: 1,
   opacityTransitionMs: 140,
   dividerThicknessPx: 1,
