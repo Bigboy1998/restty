@@ -66,32 +66,32 @@ type SeedScriptSpec = {
 
 const seedScripts: SeedScriptSpec[] = [
   {
-    urls: ["/playground/public/demo.js", "/demo.js"],
+    urls: ["/demo.js", "/playground/public/demo.js"],
     target: "demo.js",
     fallback: FALLBACK_DEMO_JS,
   },
   {
-    urls: ["/playground/public/test.js", "/test.js"],
+    urls: ["/test.js", "/playground/public/test.js"],
     target: "test.js",
     fallback: FALLBACK_TEST_JS,
   },
   {
-    urls: ["/playground/public/ansi-art.js", "/ansi-art.js"],
+    urls: ["/ansi-art.js", "/playground/public/ansi-art.js"],
     target: "ansi-art.js",
     fallback: "#!/usr/bin/env node\nconsole.log('ansi-art fallback');\n",
   },
   {
-    urls: ["/playground/public/animation.js", "/animation.js"],
+    urls: ["/animation.js", "/playground/public/animation.js"],
     target: "animation.js",
     fallback: "#!/usr/bin/env node\nconsole.log('animation fallback');\n",
   },
   {
-    urls: ["/playground/public/colors.js", "/colors.js"],
+    urls: ["/colors.js", "/playground/public/colors.js"],
     target: "colors.js",
     fallback: "#!/usr/bin/env node\nconsole.log('colors fallback');\n",
   },
   {
-    urls: ["/playground/public/kitty.js", "/kitty.js"],
+    urls: ["/kitty.js", "/playground/public/kitty.js"],
     target: "kitty.js",
     fallback: "#!/usr/bin/env node\nconsole.log('kitty fallback');\n",
   },
@@ -107,6 +107,25 @@ async function getSharedWebContainer(): Promise<WebContainer> {
 function normalizeFetchedScript(text: string): string | null {
   const noBom = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
   if (!noBom) return null;
+
+  const firstNonEmpty = noBom.split("\n").find((line) => line.trim().length > 0)?.trimStart() ?? "";
+  const lower = firstNonEmpty.toLowerCase();
+  if (
+    lower.startsWith("<!doctype") ||
+    lower.startsWith("<html") ||
+    lower.startsWith("<head") ||
+    lower.startsWith("<body") ||
+    lower.startsWith("<")
+  ) {
+    return null;
+  }
+
+  // Prefer explicit script shebangs; fall back to JS token sniffing.
+  if (firstNonEmpty.startsWith("#!")) {
+    if (!/\b(node|bun|deno|js)\b/i.test(firstNonEmpty)) return null;
+    return `${noBom}\n`;
+  }
+  if (!/(?:^|\n)\s*(const|let|var|function|import|export)\b/.test(noBom)) return null;
   return `${noBom}\n`;
 }
 
@@ -114,6 +133,8 @@ async function fetchScriptText(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) return null;
+    const contentType = (res.headers.get("content-type") || "").toLowerCase();
+    if (contentType.includes("text/html")) return null;
     return normalizeFetchedScript(await res.text());
   } catch {
     return null;
