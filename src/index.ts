@@ -1,14 +1,17 @@
 // restty public API - high-level integration first.
 
-export { Restty, ResttyPaneHandle, createRestty } from "./app/restty";
+export { RESTTY_PLUGIN_API_VERSION, Restty, ResttyPaneHandle, createRestty } from "./app/restty";
 export type {
   ResttyOptions,
   ResttyPaneApi,
+  ResttyPluginApiRange,
   ResttyPlugin,
   ResttyPluginCleanup,
   ResttyPluginContext,
   ResttyPluginDisposable,
   ResttyPluginEvents,
+  ResttyPluginInfo,
+  ResttyPluginRequires,
   ResttyInputInterceptor,
   ResttyInputInterceptorPayload,
   ResttyInterceptorOptions,

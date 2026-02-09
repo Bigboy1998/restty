@@ -221,7 +221,7 @@ mock.module("../src/app/pane-app-manager", () => ({
   createResttyAppPaneManager: (options: any) => createFakeManager(options),
 }));
 
-const { Restty } = await import("../src/app/restty");
+const { RESTTY_PLUGIN_API_VERSION, Restty } = await import("../src/app/restty");
 
 function createRestty(): InstanceType<typeof Restty> {
   return new Restty({
@@ -262,6 +262,47 @@ test("plugin lifecycle: use/unuse/plugins and cleanup", async () => {
   expect(cleaned).toBe(1);
   expect(restty.plugins()).toEqual([]);
   expect(restty.unuse("plugin/lifecycle")).toBe(false);
+});
+
+test("pluginInfo reports metadata, status, and active disposer counts", async () => {
+  const restty = createRestty();
+  restty.createInitialPane();
+  let disposeRuntime: (() => void) | null = null;
+
+  await restty.use({
+    id: "plugin/info",
+    version: "1.2.3",
+    apiVersion: RESTTY_PLUGIN_API_VERSION,
+    requires: { pluginApi: { min: 1, max: 1 } },
+    activate(ctx) {
+      const event = ctx.on("pane:resized", () => {});
+      const input = ctx.addInputInterceptor(({ text }) => text);
+      const output = ctx.addOutputInterceptor(({ text }) => text);
+      disposeRuntime = () => {
+        event.dispose();
+        input.dispose();
+        output.dispose();
+      };
+      return () => disposeRuntime?.();
+    },
+  });
+
+  const info = restty.pluginInfo("plugin/info");
+  expect(info).not.toBeNull();
+  expect(info?.id).toBe("plugin/info");
+  expect(info?.active).toBe(true);
+  expect(info?.version).toBe("1.2.3");
+  expect(info?.apiVersion).toBe(RESTTY_PLUGIN_API_VERSION);
+  expect(info?.listeners).toBe(1);
+  expect(info?.inputInterceptors).toBe(1);
+  expect(info?.outputInterceptors).toBe(1);
+  expect(Array.isArray(restty.pluginInfo())).toBe(true);
+
+  disposeRuntime?.();
+  const afterManualDispose = restty.pluginInfo("plugin/info");
+  expect(afterManualDispose?.listeners).toBe(0);
+  expect(afterManualDispose?.inputInterceptors).toBe(0);
+  expect(afterManualDispose?.outputInterceptors).toBe(0);
 });
 
 test("plugin events are emitted for pane lifecycle + focus/blur/resize", async () => {
@@ -461,4 +502,23 @@ test("invalid plugin contracts are rejected", async () => {
   const restty = createRestty();
   await expect(restty.use({} as ResttyPlugin)).rejects.toThrow("plugin id is required");
   await expect(restty.use({ id: "x" } as ResttyPlugin)).rejects.toThrow("must define activate");
+  await expect(
+    restty.use({
+      id: "invalid/api-version",
+      apiVersion: RESTTY_PLUGIN_API_VERSION + 1,
+      activate() {},
+    }),
+  ).rejects.toThrow("requires apiVersion");
+  await expect(
+    restty.use({
+      id: "invalid/range",
+      requires: { pluginApi: { min: RESTTY_PLUGIN_API_VERSION + 1 } },
+      activate() {},
+    }),
+  ).rejects.toThrow("requires pluginApi range");
+
+  const info = restty.pluginInfo("invalid/range");
+  expect(info).not.toBeNull();
+  expect(info?.active).toBe(false);
+  expect(info?.lastError).toContain("requires pluginApi range");
 });

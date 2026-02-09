@@ -15,6 +15,7 @@ If you are integrating restty into an app, read in this order:
 
 - [`goals.md`](./goals.md): scope and project intent.
 - [`usage.md`](./usage.md): API-first integration guide.
+- [`plugins.md`](./plugins.md): plugin authoring and compatibility.
 - [`how-it-works.md`](./how-it-works.md): PTY/input/render data flow.
 
 ## Internal Docs

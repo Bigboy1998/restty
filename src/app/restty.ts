@@ -22,6 +22,34 @@ export type ResttyOptions = Omit<CreateResttyAppPaneManagerOptions, "appOptions"
   createInitialPane?: boolean | { focus?: boolean };
 };
 
+/** Current Restty plugin API version. */
+export const RESTTY_PLUGIN_API_VERSION = 1;
+
+/** Plugin API version requirements. */
+export type ResttyPluginApiRange = {
+  min: number;
+  max?: number;
+};
+
+/** Optional compatibility requirements declared by plugins. */
+export type ResttyPluginRequires = {
+  pluginApi?: number | ResttyPluginApiRange;
+};
+
+/** Diagnostics snapshot for a plugin. */
+export type ResttyPluginInfo = {
+  id: string;
+  version: string | null;
+  apiVersion: number | null;
+  requires: ResttyPluginRequires | null;
+  active: boolean;
+  activatedAt: number | null;
+  lastError: string | null;
+  listeners: number;
+  inputInterceptors: number;
+  outputInterceptors: number;
+};
+
 /** Event payloads emitted by the Restty plugin host. */
 export type ResttyPluginEvents = {
   "plugin:activated": { pluginId: string };
@@ -101,13 +129,34 @@ export type ResttyPluginContext = {
 /** Plugin contract for extending Restty behavior. */
 export type ResttyPlugin = {
   id: string;
+  version?: string;
+  apiVersion?: number;
+  requires?: ResttyPluginRequires;
   activate: (context: ResttyPluginContext) => ResttyPluginCleanup | Promise<ResttyPluginCleanup>;
+};
+
+type ResttyPluginRuntimeDisposerKind = "event" | "input-interceptor" | "output-interceptor";
+type ResttyPluginRuntimeDisposer = {
+  kind: ResttyPluginRuntimeDisposerKind;
+  active: boolean;
+  dispose: () => void;
 };
 
 type ResttyPluginRuntime = {
   plugin: ResttyPlugin;
   cleanup: (() => void) | null;
-  disposers: Array<() => void>;
+  activatedAt: number;
+  disposers: Array<ResttyPluginRuntimeDisposer>;
+};
+
+type ResttyPluginDiagnostic = {
+  id: string;
+  version: string | null;
+  apiVersion: number | null;
+  requires: ResttyPluginRequires | null;
+  active: boolean;
+  activatedAt: number | null;
+  lastError: string | null;
 };
 
 type ResttyRegisteredInterceptor<T extends (payload: unknown) => string | null | void> = {
@@ -270,6 +319,7 @@ export class Restty {
     Set<(payload: unknown) => void>
   >();
   private readonly pluginRuntimes = new Map<string, ResttyPluginRuntime>();
+  private readonly pluginDiagnostics = new Map<string, ResttyPluginDiagnostic>();
   private readonly inputInterceptors: Array<ResttyRegisteredInterceptor<ResttyInputInterceptor>> =
     [];
   private readonly outputInterceptors: Array<ResttyRegisteredInterceptor<ResttyOutputInterceptor>> =
@@ -455,20 +505,57 @@ export class Restty {
       throw new Error(`Restty plugin ${pluginId} must define activate(context)`);
     }
     if (this.pluginRuntimes.has(pluginId)) return;
+    try {
+      this.assertPluginCompatibility(pluginId, plugin);
+    } catch (error) {
+      this.pluginDiagnostics.set(pluginId, {
+        id: pluginId,
+        version: plugin.version?.trim?.() || null,
+        apiVersion: Number.isFinite(plugin.apiVersion) ? Number(plugin.apiVersion) : null,
+        requires: plugin.requires ?? null,
+        active: false,
+        activatedAt: null,
+        lastError: this.errorToMessage(error),
+      });
+      throw error;
+    }
 
     const runtime: ResttyPluginRuntime = {
-      plugin: { ...plugin, id: pluginId },
+      plugin: this.normalizePluginMetadata(plugin, pluginId),
       cleanup: null,
+      activatedAt: Date.now(),
       disposers: [],
     };
+    this.pluginDiagnostics.set(pluginId, {
+      id: pluginId,
+      version: runtime.plugin.version?.trim?.() || null,
+      apiVersion: Number.isFinite(runtime.plugin.apiVersion)
+        ? Number(runtime.plugin.apiVersion)
+        : null,
+      requires: runtime.plugin.requires ?? null,
+      active: false,
+      activatedAt: null,
+      lastError: null,
+    });
     this.pluginRuntimes.set(pluginId, runtime);
     try {
       const cleanup = await runtime.plugin.activate(this.createPluginContext(runtime));
       runtime.cleanup = this.normalizePluginCleanup(cleanup);
+      runtime.activatedAt = Date.now();
+      this.updatePluginDiagnostic(pluginId, {
+        active: true,
+        activatedAt: runtime.activatedAt,
+        lastError: null,
+      });
       this.emitPluginEvent("plugin:activated", { pluginId });
     } catch (error) {
       this.teardownPluginRuntime(runtime);
       this.pluginRuntimes.delete(pluginId);
+      this.updatePluginDiagnostic(pluginId, {
+        active: false,
+        activatedAt: null,
+        lastError: this.errorToMessage(error),
+      });
       throw error;
     }
   }
@@ -480,12 +567,33 @@ export class Restty {
     if (!runtime) return false;
     this.pluginRuntimes.delete(key);
     this.teardownPluginRuntime(runtime);
+    this.updatePluginDiagnostic(key, {
+      active: false,
+      activatedAt: null,
+    });
     this.emitPluginEvent("plugin:deactivated", { pluginId: key });
     return true;
   }
 
   plugins(): string[] {
     return Array.from(this.pluginRuntimes.keys());
+  }
+
+  pluginInfo(pluginId: string): ResttyPluginInfo | null;
+  pluginInfo(): ResttyPluginInfo[];
+  pluginInfo(pluginId?: string): ResttyPluginInfo | ResttyPluginInfo[] | null {
+    if (typeof pluginId === "string") {
+      const key = pluginId.trim();
+      if (!key) return null;
+      return this.buildPluginInfo(key);
+    }
+    const keys = new Set<string>();
+    for (const key of this.pluginDiagnostics.keys()) keys.add(key);
+    for (const key of this.pluginRuntimes.keys()) keys.add(key);
+    return Array.from(keys)
+      .sort((a, b) => a.localeCompare(b))
+      .map((key) => this.buildPluginInfo(key))
+      .filter((entry): entry is ResttyPluginInfo => entry !== null);
   }
 
   destroy(): void {
@@ -619,21 +727,51 @@ export class Restty {
         event: E,
         listener: (payload: ResttyPluginEvents[E]) => void,
       ) => {
-        const dispose = this.onPluginEvent(event, listener);
-        runtime.disposers.push(dispose);
-        return { dispose };
+        return {
+          dispose: this.attachRuntimeDisposer(
+            runtime,
+            "event",
+            this.onPluginEvent(event, listener),
+          ),
+        };
       },
       addInputInterceptor: (interceptor, options) => {
-        const dispose = this.addInputInterceptor(runtime.plugin.id, interceptor, options);
-        runtime.disposers.push(dispose);
-        return { dispose };
+        return {
+          dispose: this.attachRuntimeDisposer(
+            runtime,
+            "input-interceptor",
+            this.addInputInterceptor(runtime.plugin.id, interceptor, options),
+          ),
+        };
       },
       addOutputInterceptor: (interceptor, options) => {
-        const dispose = this.addOutputInterceptor(runtime.plugin.id, interceptor, options);
-        runtime.disposers.push(dispose);
-        return { dispose };
+        return {
+          dispose: this.attachRuntimeDisposer(
+            runtime,
+            "output-interceptor",
+            this.addOutputInterceptor(runtime.plugin.id, interceptor, options),
+          ),
+        };
       },
     };
+  }
+
+  private attachRuntimeDisposer(
+    runtime: ResttyPluginRuntime,
+    kind: ResttyPluginRuntimeDisposerKind,
+    dispose: () => void,
+  ): () => void {
+    const entry: ResttyPluginRuntimeDisposer = {
+      kind,
+      active: true,
+      dispose: () => {
+        if (!entry.active) return;
+        entry.active = false;
+        dispose();
+      },
+    };
+    runtime.disposers.push(entry);
+    return entry.dispose;
   }
 
   private addInputInterceptor(
@@ -705,6 +843,117 @@ export class Restty {
     return currentText;
   }
 
+  private normalizePluginMetadata(plugin: ResttyPlugin, pluginId: string): ResttyPlugin {
+    return {
+      ...plugin,
+      id: pluginId,
+      version: plugin.version?.trim?.() || undefined,
+      apiVersion: Number.isFinite(plugin.apiVersion)
+        ? Math.trunc(Number(plugin.apiVersion))
+        : undefined,
+      requires: plugin.requires ?? undefined,
+    };
+  }
+
+  private assertPluginCompatibility(pluginId: string, plugin: ResttyPlugin): void {
+    const version = plugin.version?.trim?.();
+    if (version !== undefined && !version) {
+      throw new Error(`Restty plugin ${pluginId} has an empty version`);
+    }
+
+    if (plugin.apiVersion !== undefined) {
+      if (!Number.isInteger(plugin.apiVersion) || plugin.apiVersion < 1) {
+        throw new Error(
+          `Restty plugin ${pluginId} has invalid apiVersion ${String(plugin.apiVersion)}`,
+        );
+      }
+      if (plugin.apiVersion !== RESTTY_PLUGIN_API_VERSION) {
+        throw new Error(
+          `Restty plugin ${pluginId} requires apiVersion ${plugin.apiVersion}, current is ${RESTTY_PLUGIN_API_VERSION}`,
+        );
+      }
+    }
+
+    const requirement = plugin.requires?.pluginApi;
+    if (requirement === undefined) return;
+    if (typeof requirement === "number") {
+      if (!Number.isInteger(requirement) || requirement < 1) {
+        throw new Error(`Restty plugin ${pluginId} has invalid requires.pluginApi value`);
+      }
+      if (requirement !== RESTTY_PLUGIN_API_VERSION) {
+        throw new Error(
+          `Restty plugin ${pluginId} requires pluginApi ${requirement}, current is ${RESTTY_PLUGIN_API_VERSION}`,
+        );
+      }
+      return;
+    }
+
+    const min = requirement.min;
+    const max = requirement.max;
+    if (!Number.isInteger(min) || min < 1) {
+      throw new Error(`Restty plugin ${pluginId} has invalid requires.pluginApi.min`);
+    }
+    if (max !== undefined && (!Number.isInteger(max) || max < min)) {
+      throw new Error(`Restty plugin ${pluginId} has invalid requires.pluginApi.max`);
+    }
+    if (RESTTY_PLUGIN_API_VERSION < min || (max !== undefined && RESTTY_PLUGIN_API_VERSION > max)) {
+      const range = max === undefined ? `>=${min}` : `${min}-${max}`;
+      throw new Error(
+        `Restty plugin ${pluginId} requires pluginApi range ${range}, current is ${RESTTY_PLUGIN_API_VERSION}`,
+      );
+    }
+  }
+
+  private updatePluginDiagnostic(
+    pluginId: string,
+    patch: Partial<Pick<ResttyPluginDiagnostic, "active" | "activatedAt" | "lastError">>,
+  ): void {
+    const current = this.pluginDiagnostics.get(pluginId);
+    if (!current) return;
+    this.pluginDiagnostics.set(pluginId, {
+      ...current,
+      ...patch,
+    });
+  }
+
+  private buildPluginInfo(pluginId: string): ResttyPluginInfo | null {
+    const diagnostic = this.pluginDiagnostics.get(pluginId) ?? null;
+    const runtime = this.pluginRuntimes.get(pluginId) ?? null;
+    if (!diagnostic && !runtime) return null;
+    const plugin = runtime?.plugin;
+    const listeners = runtime
+      ? runtime.disposers.filter((entry) => entry.active && entry.kind === "event").length
+      : 0;
+    const inputInterceptors = runtime
+      ? runtime.disposers.filter((entry) => entry.active && entry.kind === "input-interceptor")
+          .length
+      : 0;
+    const outputInterceptors = runtime
+      ? runtime.disposers.filter((entry) => entry.active && entry.kind === "output-interceptor")
+          .length
+      : 0;
+
+    return {
+      id: pluginId,
+      version: plugin?.version?.trim?.() || diagnostic?.version || null,
+      apiVersion:
+        plugin?.apiVersion ??
+        (Number.isFinite(diagnostic?.apiVersion) ? diagnostic?.apiVersion : null),
+      requires: plugin?.requires ?? diagnostic?.requires ?? null,
+      active: runtime ? true : (diagnostic?.active ?? false),
+      activatedAt: runtime?.activatedAt ?? diagnostic?.activatedAt ?? null,
+      lastError: diagnostic?.lastError ?? null,
+      listeners,
+      inputInterceptors,
+      outputInterceptors,
+    };
+  }
+
+  private errorToMessage(error: unknown): string {
+    if (error instanceof Error) return error.message || error.name || "Unknown error";
+    return String(error);
+  }
+
   private onPluginEvent<E extends keyof ResttyPluginEvents>(
     event: E,
     listener: (payload: ResttyPluginEvents[E]) => void,
@@ -745,7 +994,7 @@ export class Restty {
   private teardownPluginRuntime(runtime: ResttyPluginRuntime): void {
     for (let i = 0; i < runtime.disposers.length; i += 1) {
       try {
-        runtime.disposers[i]();
+        runtime.disposers[i].dispose();
       } catch {
         // ignore plugin dispose errors
       }

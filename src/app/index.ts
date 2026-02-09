@@ -70,6 +70,7 @@ export {
   getResttyShortcutModifierLabel,
 } from "./panes";
 export { Restty } from "./restty";
+export { RESTTY_PLUGIN_API_VERSION } from "./restty";
 export type {
   ResttyAppElements,
   ResttyAppCallbacks,
@@ -100,11 +101,14 @@ export type {
 } from "./panes";
 export type {
   ResttyOptions,
+  ResttyPluginApiRange,
   ResttyPlugin,
   ResttyPluginCleanup,
   ResttyPluginContext,
   ResttyPluginDisposable,
   ResttyPluginEvents,
+  ResttyPluginInfo,
+  ResttyPluginRequires,
   ResttyInputInterceptor,
   ResttyInputInterceptorPayload,
   ResttyInterceptorOptions,

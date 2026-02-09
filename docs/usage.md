@@ -205,6 +205,11 @@ import type { ResttyPlugin } from "restty";
 
 const logPlugin: ResttyPlugin = {
   id: "example/log-pane-events",
+  version: "1.0.0",
+  apiVersion: 1,
+  requires: {
+    pluginApi: { min: 1, max: 1 },
+  },
   activate(ctx) {
     const created = ctx.on("pane:created", ({ paneId }) => {
       console.log("pane created", paneId);
@@ -225,6 +230,7 @@ const logPlugin: ResttyPlugin = {
 
 await restty.use(logPlugin);
 console.log(restty.plugins()); // ["example/log-pane-events"]
+console.log(restty.pluginInfo("example/log-pane-events"));
 restty.unuse("example/log-pane-events");
 ```
 
