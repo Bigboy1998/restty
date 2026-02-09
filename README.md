@@ -155,6 +155,78 @@ const restty = new Restty({
 });
 ```
 
+### Plugin system (native)
+
+Use plugins when you want to extend restty behavior without patching core.
+
+```ts
+import type { ResttyPlugin } from "restty";
+
+const metricsPlugin: ResttyPlugin = {
+  id: "example/metrics",
+  apiVersion: 1,
+  activate(ctx) {
+    const paneCreated = ctx.on("pane:created", ({ paneId }) => {
+      console.log("pane created", paneId);
+    });
+    const outgoing = ctx.addInputInterceptor(({ text }) => text.replace(/\t/g, "  "));
+    const lifecycle = ctx.addLifecycleHook(({ phase, action }) => {
+      console.log("lifecycle", phase, action);
+    });
+    return () => {
+      paneCreated.dispose();
+      outgoing.dispose();
+      lifecycle.dispose();
+    };
+  },
+};
+
+await restty.use(metricsPlugin, { sampleRate: 1 });
+console.log(restty.pluginInfo("example/metrics"));
+restty.unuse("example/metrics");
+```
+
+Declarative loading (manifest + registry):
+
+```ts
+await restty.loadPlugins(
+  [{ id: "example/metrics", options: { sampleRate: 1 } }],
+  {
+    "example/metrics": () => metricsPlugin,
+  },
+);
+```
+
+See `docs/plugins.md` for full plugin authoring details.
+
+### xterm compatibility layer
+
+For migration from xterm.js-style app code, use `restty/xterm`:
+
+```ts
+import { Terminal } from "restty/xterm";
+
+const term = new Terminal({ cols: 100, rows: 30 });
+term.open(document.getElementById("terminal") as HTMLElement);
+
+term.onData((data) => console.log("input", data));
+term.onResize(({ cols, rows }) => console.log("resize", cols, rows));
+
+term.write("hello");
+term.writeln(" world");
+term.resize(120, 40);
+term.loadAddon({
+  activate() {},
+  dispose() {},
+});
+```
+
+Compatibility scope:
+
+- Good for common embed/migration flows.
+- Not full xterm internals parity (buffer/parser/marker ecosystem APIs are not all implemented).
+- Prefer native `Restty` API for long-term integrations.
+
 ## API Snapshot
 
 Primary class:
