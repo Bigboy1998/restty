@@ -44,6 +44,9 @@ export type ResttyPaneApi = {
   copySelectionToClipboard: () => Promise<boolean>;
   pasteFromClipboard: () => Promise<boolean>;
   dumpAtlasForCodepoint: (cp: number) => void;
+  resize: (cols: number, rows: number) => void;
+  focus: () => void;
+  blur: () => void;
   updateSize: (force?: boolean) => void;
   getBackend: () => string;
   getRawPane: () => ResttyManagedAppPane;
@@ -131,6 +134,18 @@ export class ResttyPaneHandle implements ResttyPaneApi {
 
   dumpAtlasForCodepoint(cp: number): void {
     this.resolvePane().app.dumpAtlasForCodepoint(cp);
+  }
+
+  resize(cols: number, rows: number): void {
+    this.resolvePane().app.resize(cols, rows);
+  }
+
+  focus(): void {
+    this.resolvePane().app.focus();
+  }
+
+  blur(): void {
+    this.resolvePane().app.blur();
   }
 
   updateSize(force?: boolean): void {
@@ -343,6 +358,18 @@ export class Restty {
 
   dumpAtlasForCodepoint(cp: number): void {
     this.requireActivePaneHandle().dumpAtlasForCodepoint(cp);
+  }
+
+  resize(cols: number, rows: number): void {
+    this.requireActivePaneHandle().resize(cols, rows);
+  }
+
+  focus(): void {
+    this.requireActivePaneHandle().focus();
+  }
+
+  blur(): void {
+    this.requireActivePaneHandle().blur();
   }
 
   updateSize(force?: boolean): void {

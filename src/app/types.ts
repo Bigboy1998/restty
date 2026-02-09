@@ -260,6 +260,12 @@ export type ResttyApp = {
   pasteFromClipboard: () => Promise<boolean>;
   /** Dump the glyph atlas entry for a given Unicode codepoint. */
   dumpAtlasForCodepoint: (cp: number) => void;
+  /** Resize terminal grid to explicit columns/rows. */
+  resize: (cols: number, rows: number) => void;
+  /** Focus terminal input targets. */
+  focus: () => void;
+  /** Blur terminal input targets. */
+  blur: () => void;
   /** Recalculate terminal dimensions from the canvas size. */
   updateSize: (force?: boolean) => void;
   /** Return the name of the active renderer backend. */

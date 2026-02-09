@@ -69,6 +69,9 @@ restty.setMouseMode("auto");
 await restty.copySelectionToClipboard();
 await restty.pasteFromClipboard();
 
+restty.focus();
+restty.resize(120, 32);
+restty.blur();
 restty.updateSize();
 restty.disconnectPty();
 ```

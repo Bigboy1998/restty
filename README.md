@@ -176,6 +176,7 @@ Active-pane convenience:
 - `setMouseMode("auto" | "on" | "off")`
 - `sendInput(text)` / `sendKeyInput(text)`
 - `copySelectionToClipboard()` / `pasteFromClipboard()`
+- `resize(cols, rows)` / `focus()` / `blur()`
 - `updateSize(force?)`
 - `destroy()`
 

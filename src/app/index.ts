@@ -3644,6 +3644,38 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     lastRenderTime = 0;
   }
 
+  function resize(cols: number, rows: number) {
+    const nextCols = Math.max(1, Math.floor(Number(cols)));
+    const nextRows = Math.max(1, Math.floor(Number(rows)));
+    if (!Number.isFinite(nextCols) || !Number.isFinite(nextRows)) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    if (dpr !== currentDpr) {
+      currentDpr = dpr;
+      if (dprEl) dprEl.textContent = dpr.toFixed(2);
+      callbacks?.onDpr?.(dpr);
+    }
+
+    const metrics = computeCellMetrics();
+    if (!metrics) return;
+
+    canvas.width = Math.max(1, nextCols * metrics.cellW);
+    canvas.height = Math.max(1, nextRows * metrics.cellH);
+    if (sizeEl) sizeEl.textContent = `${canvas.width}x${canvas.height}`;
+    callbacks?.onCanvasSize?.(canvas.width, canvas.height);
+
+    resizeState.dpr = currentDpr;
+    resizeState.active = true;
+    resizeState.lastAt = performance.now();
+    resizeState.cols = nextCols;
+    resizeState.rows = nextRows;
+
+    updateGrid();
+    scheduleTerminalResizeCommit(nextCols, nextRows, { immediate: true });
+    needsRender = true;
+    lastRenderTime = 0;
+  }
+
   function scheduleSizeUpdate() {
     // Apply one immediate update so canvas backing size follows live drag.
     updateSize();
@@ -3657,20 +3689,39 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     });
   }
 
+  function focusTypingInput() {
+    canvas.focus({ preventScroll: true });
+    if (!imeInput) return;
+    imeInput.focus({ preventScroll: true });
+    // Safari can occasionally drop scripted IME focus; retry once on next frame.
+    if (typeof document !== "undefined" && document.activeElement !== imeInput) {
+      requestAnimationFrame(() => {
+        if (document.activeElement === canvas) imeInput.focus({ preventScroll: true });
+      });
+    }
+  }
+
+  function focus() {
+    focusTypingInput();
+    isFocused =
+      typeof document !== "undefined" && imeInput
+        ? document.activeElement === canvas || document.activeElement === imeInput
+        : true;
+  }
+
+  function blur() {
+    if (imeInput && document.activeElement === imeInput) {
+      imeInput.blur();
+    }
+    if (document.activeElement === canvas) {
+      canvas.blur();
+    }
+    isFocused = false;
+  }
+
   function bindFocusEvents() {
     if (!attachCanvasEvents) return;
     canvas.tabIndex = 0;
-    const focusTypingInput = () => {
-      canvas.focus({ preventScroll: true });
-      if (!imeInput) return;
-      imeInput.focus({ preventScroll: true });
-      // Safari can occasionally drop scripted IME focus; retry once on next frame.
-      if (typeof document !== "undefined" && document.activeElement !== imeInput) {
-        requestAnimationFrame(() => {
-          if (document.activeElement === canvas) imeInput.focus({ preventScroll: true });
-        });
-      }
-    };
     const handleFocus = () => {
       isFocused = true;
       focusTypingInput();
@@ -7337,6 +7388,9 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
     copySelectionToClipboard,
     pasteFromClipboard,
     dumpAtlasForCodepoint,
+    resize,
+    focus,
+    blur,
     updateSize,
     getBackend: () => backend,
   };
