@@ -202,6 +202,29 @@ function isLikelyEmojiCodepoint(cp: number): boolean {
   return false;
 }
 
+function isVariationSelectorCodepoint(cp: number): boolean {
+  if (cp >= 0xfe00 && cp <= 0xfe0f) return true;
+  if (cp >= 0xe0100 && cp <= 0xe01ef) return true;
+  return false;
+}
+
+function isCombiningMarkCodepoint(cp: number): boolean {
+  if (cp >= 0x0300 && cp <= 0x036f) return true;
+  if (cp >= 0x1ab0 && cp <= 0x1aff) return true;
+  if (cp >= 0x1dc0 && cp <= 0x1dff) return true;
+  if (cp >= 0x20d0 && cp <= 0x20ff) return true;
+  if (cp >= 0xfe20 && cp <= 0xfe2f) return true;
+  return false;
+}
+
+function isCoverageIgnorableCodepoint(cp: number): boolean {
+  if (cp === 0x200c || cp === 0x200d) return true;
+  if (isVariationSelectorCodepoint(cp)) return true;
+  if (isCombiningMarkCodepoint(cp)) return true;
+  if (cp >= 0xe0020 && cp <= 0xe007f) return true;
+  return false;
+}
+
 function resolvePresentationPreference(
   text: string,
   chars: string[],
@@ -232,6 +255,10 @@ export function pickFontIndexForText(
   if (cached !== undefined) return cached;
 
   const chars = Array.from(text);
+  const requiredChars = chars.filter((ch) => {
+    const cp = ch.codePointAt(0) ?? 0;
+    return !isCoverageIgnorableCodepoint(cp);
+  });
   const firstCp = text.codePointAt(0) ?? 0;
   const nerdSymbol = isNerdSymbolCodepoint(firstCp);
   const presentation = resolvePresentationPreference(text, chars);
@@ -242,7 +269,7 @@ export function pickFontIndexForText(
       if (!entry?.font) continue;
       if (predicate && !predicate(entry)) continue;
       let ok = true;
-      for (const ch of chars) {
+      for (const ch of requiredChars) {
         if (!fontHasGlyph(entry.font, ch)) {
           ok = false;
           break;

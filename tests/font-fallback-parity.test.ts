@@ -62,6 +62,28 @@ test("text presentation selector prefers non-emoji fonts", () => {
   expect(picked).toBe(0);
 });
 
+test("emoji ZWJ sequence ignores join controls when selecting emoji fallback", () => {
+  const state = createFontManagerState();
+  state.fonts = [
+    createFontEntry(makeFont([0x41]), "Primary Mono"),
+    createFontEntry(makeFont([0x1f468, 0x1f469, 0x1f467]), "Noto Color Emoji"),
+  ];
+  const text = `${String.fromCodePoint(0x1f468)}\u200d${String.fromCodePoint(0x1f469)}\u200d${String.fromCodePoint(0x1f467)}`;
+  const picked = pickFontIndexForText(state, text, 2);
+  expect(picked).toBe(1);
+});
+
+test("combining marks do not force symbol fallback for Latin text", () => {
+  const state = createFontManagerState();
+  state.fonts = [
+    createFontEntry(makeFont([0x65, 0x6e, 0x61]), "Primary Mono"),
+    createFontEntry(makeFont([0x65, 0x6e, 0x61, 0x0301, 0x0303, 0x0308]), "Symbola"),
+  ];
+  const text = `e${String.fromCodePoint(0x0301)}`;
+  const picked = pickFontIndexForText(state, text, 1);
+  expect(picked).toBe(0);
+});
+
 test("non-nerd symbols prefer first matching fallback in order", () => {
   const state = createFontManagerState();
   state.fonts = [

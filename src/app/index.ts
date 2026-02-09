@@ -4219,6 +4219,41 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     return false;
   }
 
+  function isVariationSelectorCodepoint(cp: number) {
+    if (cp >= 0xfe00 && cp <= 0xfe0f) return true;
+    if (cp >= 0xe0100 && cp <= 0xe01ef) return true;
+    return false;
+  }
+
+  function isCombiningMarkCodepoint(cp: number) {
+    if (cp >= 0x0300 && cp <= 0x036f) return true;
+    if (cp >= 0x1ab0 && cp <= 0x1aff) return true;
+    if (cp >= 0x1dc0 && cp <= 0x1dff) return true;
+    if (cp >= 0x20d0 && cp <= 0x20ff) return true;
+    if (cp >= 0xfe20 && cp <= 0xfe2f) return true;
+    return false;
+  }
+
+  function isEmojiModifierCodepoint(cp: number) {
+    return cp >= 0x1f3fb && cp <= 0x1f3ff;
+  }
+
+  function isCoverageIgnorableCodepoint(cp: number) {
+    if (cp === 0x200c || cp === 0x200d) return true;
+    if (isVariationSelectorCodepoint(cp)) return true;
+    if (isCombiningMarkCodepoint(cp)) return true;
+    if (cp >= 0xe0020 && cp <= 0xe007f) return true;
+    return false;
+  }
+
+  function shouldMergeTrailingClusterCodepoint(cp: number) {
+    if (cp === 0x200c || cp === 0x200d) return true;
+    if (isVariationSelectorCodepoint(cp)) return true;
+    if (isCombiningMarkCodepoint(cp)) return true;
+    if (isEmojiModifierCodepoint(cp)) return true;
+    return false;
+  }
+
   function resolvePresentationPreference(text: string, chars: string[]) {
     if (text.includes("\ufe0f")) return "emoji";
     if (text.includes("\ufe0e")) return "text";
@@ -4237,6 +4272,10 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     if (cached !== undefined) return cached;
 
     const chars = Array.from(text);
+    const requiredChars = chars.filter((ch) => {
+      const cp = ch.codePointAt(0) ?? 0;
+      return !isCoverageIgnorableCodepoint(cp);
+    });
     const firstCp = text.codePointAt(0) ?? 0;
     const nerdSymbol = isNerdSymbolCodepoint(firstCp);
     const presentation = resolvePresentationPreference(text, chars);
@@ -4261,34 +4300,41 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
               ]
             : [];
 
-    const pickFirstMatch = (predicate?) => {
+    const pickFirstMatch = (predicate?, allowSequenceShapingFallback = false) => {
       for (let i = 0; i < fontState.fonts.length; i += 1) {
         const entry = fontState.fonts[i];
         if (!entry?.font) continue;
         if (predicate && !predicate(entry)) continue;
         let ok = true;
-        for (const ch of chars) {
+        for (const ch of requiredChars) {
           if (!fontHasGlyph(entry.font, ch)) {
             ok = false;
             break;
           }
         }
+        if (!ok && allowSequenceShapingFallback) {
+          const shaped = shapeClusterWithFont(entry, text);
+          ok = shaped.glyphs.some((glyph) => (glyph.glyphId ?? 0) !== 0);
+        }
         if (ok) return i;
       }
       return -1;
     };
-    const pickWithStyle = (predicate?) => {
+    const pickWithStyle = (predicate?, allowSequenceShapingFallback = false) => {
       if (styleHintsEnabled) {
         for (let i = 0; i < stylePredicates.length; i += 1) {
           const stylePredicate = stylePredicates[i];
-          const styledIndex = pickFirstMatch((entry) => {
-            if (!stylePredicate(entry)) return false;
-            return predicate ? !!predicate(entry) : true;
-          });
+          const styledIndex = pickFirstMatch(
+            (entry) => {
+              if (!stylePredicate(entry)) return false;
+              return predicate ? !!predicate(entry) : true;
+            },
+            allowSequenceShapingFallback,
+          );
           if (styledIndex >= 0) return styledIndex;
         }
       }
-      return pickFirstMatch(predicate);
+      return pickFirstMatch(predicate, allowSequenceShapingFallback);
     };
 
     const tryIndex = (index) => {
@@ -4304,7 +4350,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     }
 
     if (presentation === "emoji") {
-      const emojiIndex = pickFirstMatch((entry) => isColorEmojiFont(entry));
+      const emojiIndex = pickFirstMatch((entry) => isColorEmojiFont(entry), true);
       const result = tryIndex(emojiIndex);
       if (result !== null) return result;
     } else if (presentation === "text") {
@@ -5110,13 +5156,12 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
 
         let nextSeqIdx = idx + baseSpan;
         let guard = 0;
-        while (
-          (text.codePointAt(text.length - 1) ?? 0) === 0x200d &&
-          nextSeqIdx < rowEnd &&
-          guard < 8
-        ) {
+        while (nextSeqIdx < rowEnd && guard < 12) {
           const next = readCellCluster(nextSeqIdx);
           if (!next || !next.cp || isSpaceCp(next.cp)) break;
+          const shouldMerge =
+            text.endsWith("\u200d") || shouldMergeTrailingClusterCodepoint(next.cp);
+          if (!shouldMerge) break;
           text += next.text;
           baseSpan += next.span;
           mergedEmojiSkip[nextSeqIdx] = 1;
@@ -6191,13 +6236,12 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
 
         let nextSeqIdx = idx + baseSpan;
         let guard = 0;
-        while (
-          (text.codePointAt(text.length - 1) ?? 0) === 0x200d &&
-          nextSeqIdx < rowEnd &&
-          guard < 8
-        ) {
+        while (nextSeqIdx < rowEnd && guard < 12) {
           const next = readCellCluster(nextSeqIdx);
           if (!next || !next.cp || isSpaceCp(next.cp)) break;
+          const shouldMerge =
+            text.endsWith("\u200d") || shouldMergeTrailingClusterCodepoint(next.cp);
+          if (!shouldMerge) break;
           text += next.text;
           baseSpan += next.span;
           mergedEmojiSkip[nextSeqIdx] = 1;
