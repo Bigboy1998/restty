@@ -146,6 +146,12 @@ export type ResttyFontPreset = "default-cdn" | "none";
  */
 export type ResttyTouchSelectionMode = "drag" | "long-press" | "off";
 
+/** Input payload passed to ResttyApp before-input hooks. */
+export type ResttyAppInputPayload = {
+  text: string;
+  source: string;
+};
+
 /**
  * Options for creating a ResttyApp instance.
  */
@@ -214,6 +220,16 @@ export type ResttyAppOptions = {
   debugExpose?: boolean;
   /** PTY transport layer for terminal I/O. */
   ptyTransport?: PtyTransport;
+  /**
+   * Optional hook to transform or suppress terminal/program input
+   * before it is written to the terminal core.
+   */
+  beforeInput?: (payload: ResttyAppInputPayload) => string | null | void;
+  /**
+   * Optional hook to transform or suppress PTY output before it is
+   * queued for rendering.
+   */
+  beforeRenderOutput?: (payload: ResttyAppInputPayload) => string | null | void;
 };
 
 /**

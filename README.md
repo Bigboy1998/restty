@@ -183,6 +183,7 @@ Active-pane convenience:
 Plugin host:
 
 - `use(plugin)` / `unuse(pluginId)` / `plugins()`
+- plugin context supports `on(...)`, `addInputInterceptor(...)`, `addOutputInterceptor(...)`
 
 ## Advanced / Internal Modules
 

@@ -48,6 +48,35 @@ export type ResttyPluginDisposable = {
 /** Optional cleanup return supported by plugin activation. */
 export type ResttyPluginCleanup = void | (() => void) | ResttyPluginDisposable;
 
+/** Payload passed to input interceptors before terminal/program input is written. */
+export type ResttyInputInterceptorPayload = {
+  paneId: number;
+  text: string;
+  source: string;
+};
+
+/** Payload passed to output interceptors before PTY data is rendered. */
+export type ResttyOutputInterceptorPayload = {
+  paneId: number;
+  text: string;
+  source: string;
+};
+
+/** Input interceptor contract. */
+export type ResttyInputInterceptor = (
+  payload: ResttyInputInterceptorPayload,
+) => string | null | void;
+
+/** Output interceptor contract. */
+export type ResttyOutputInterceptor = (
+  payload: ResttyOutputInterceptorPayload,
+) => string | null | void;
+
+/** Shared options for interceptor ordering. */
+export type ResttyInterceptorOptions = {
+  priority?: number;
+};
+
 /** Context object provided to each plugin on activation. */
 export type ResttyPluginContext = {
   restty: Restty;
@@ -58,6 +87,14 @@ export type ResttyPluginContext = {
   on: <E extends keyof ResttyPluginEvents>(
     event: E,
     listener: (payload: ResttyPluginEvents[E]) => void,
+  ) => ResttyPluginDisposable;
+  addInputInterceptor: (
+    interceptor: ResttyInputInterceptor,
+    options?: ResttyInterceptorOptions,
+  ) => ResttyPluginDisposable;
+  addOutputInterceptor: (
+    interceptor: ResttyOutputInterceptor,
+    options?: ResttyInterceptorOptions,
   ) => ResttyPluginDisposable;
 };
 
@@ -70,7 +107,15 @@ export type ResttyPlugin = {
 type ResttyPluginRuntime = {
   plugin: ResttyPlugin;
   cleanup: (() => void) | null;
-  listenerDisposers: Array<() => void>;
+  disposers: Array<() => void>;
+};
+
+type ResttyRegisteredInterceptor<T extends (payload: unknown) => string | null | void> = {
+  id: number;
+  pluginId: string;
+  priority: number;
+  order: number;
+  interceptor: T;
 };
 
 /**
@@ -225,6 +270,12 @@ export class Restty {
     Set<(payload: unknown) => void>
   >();
   private readonly pluginRuntimes = new Map<string, ResttyPluginRuntime>();
+  private readonly inputInterceptors: Array<ResttyRegisteredInterceptor<ResttyInputInterceptor>> =
+    [];
+  private readonly outputInterceptors: Array<ResttyRegisteredInterceptor<ResttyOutputInterceptor>> =
+    [];
+  private nextInterceptorId = 1;
+  private nextInterceptorOrder = 1;
 
   constructor(options: ResttyOptions) {
     const {
@@ -241,10 +292,24 @@ export class Restty {
     this.fontSources = fontSources ? [...fontSources] : undefined;
     const mergedAppOptions: CreateResttyAppPaneManagerOptions["appOptions"] = (context) => {
       const resolved = typeof appOptions === "function" ? appOptions(context) : (appOptions ?? {});
-      if (!this.fontSources) return resolved;
+      const resolvedBeforeInput = resolved.beforeInput;
+      const resolvedBeforeRenderOutput = resolved.beforeRenderOutput;
+
       return {
         ...resolved,
-        fontSources: this.fontSources,
+        ...(this.fontSources ? { fontSources: this.fontSources } : {}),
+        beforeInput: ({ text, source }) => {
+          const maybeUserText = resolvedBeforeInput?.({ text, source });
+          if (maybeUserText === null) return null;
+          const current = maybeUserText === undefined ? text : maybeUserText;
+          return this.applyInputInterceptors(context.id, current, source);
+        },
+        beforeRenderOutput: ({ text, source }) => {
+          const maybeUserText = resolvedBeforeRenderOutput?.({ text, source });
+          if (maybeUserText === null) return null;
+          const current = maybeUserText === undefined ? text : maybeUserText;
+          return this.applyOutputInterceptors(context.id, current, source);
+        },
       };
     };
 
@@ -394,7 +459,7 @@ export class Restty {
     const runtime: ResttyPluginRuntime = {
       plugin: { ...plugin, id: pluginId },
       cleanup: null,
-      listenerDisposers: [],
+      disposers: [],
     };
     this.pluginRuntimes.set(pluginId, runtime);
     try {
@@ -555,10 +620,89 @@ export class Restty {
         listener: (payload: ResttyPluginEvents[E]) => void,
       ) => {
         const dispose = this.onPluginEvent(event, listener);
-        runtime.listenerDisposers.push(dispose);
+        runtime.disposers.push(dispose);
+        return { dispose };
+      },
+      addInputInterceptor: (interceptor, options) => {
+        const dispose = this.addInputInterceptor(runtime.plugin.id, interceptor, options);
+        runtime.disposers.push(dispose);
+        return { dispose };
+      },
+      addOutputInterceptor: (interceptor, options) => {
+        const dispose = this.addOutputInterceptor(runtime.plugin.id, interceptor, options);
+        runtime.disposers.push(dispose);
         return { dispose };
       },
     };
+  }
+
+  private addInputInterceptor(
+    pluginId: string,
+    interceptor: ResttyInputInterceptor,
+    options?: ResttyInterceptorOptions,
+  ): () => void {
+    return this.registerInterceptor(this.inputInterceptors, pluginId, interceptor, options);
+  }
+
+  private addOutputInterceptor(
+    pluginId: string,
+    interceptor: ResttyOutputInterceptor,
+    options?: ResttyInterceptorOptions,
+  ): () => void {
+    return this.registerInterceptor(this.outputInterceptors, pluginId, interceptor, options);
+  }
+
+  private registerInterceptor<T extends (payload: unknown) => string | null | void>(
+    bucket: Array<ResttyRegisteredInterceptor<T>>,
+    pluginId: string,
+    interceptor: T,
+    options?: ResttyInterceptorOptions,
+  ): () => void {
+    const entry: ResttyRegisteredInterceptor<T> = {
+      id: this.nextInterceptorId++,
+      pluginId,
+      priority: Number.isFinite(options?.priority) ? Number(options?.priority) : 0,
+      order: this.nextInterceptorOrder++,
+      interceptor,
+    };
+    bucket.push(entry);
+    bucket.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      return a.order - b.order;
+    });
+    return () => {
+      const index = bucket.findIndex((current) => current.id === entry.id);
+      if (index >= 0) {
+        bucket.splice(index, 1);
+      }
+    };
+  }
+
+  private applyInputInterceptors(paneId: number, text: string, source: string): string | null {
+    return this.applyInterceptors(this.inputInterceptors, "input", { paneId, text, source });
+  }
+
+  private applyOutputInterceptors(paneId: number, text: string, source: string): string | null {
+    return this.applyInterceptors(this.outputInterceptors, "output", { paneId, text, source });
+  }
+
+  private applyInterceptors<TPayload extends { text: string }>(
+    bucket: Array<ResttyRegisteredInterceptor<(payload: TPayload) => string | null | void>>,
+    kind: "input" | "output",
+    payload: TPayload,
+  ): string | null {
+    let currentText = payload.text;
+    for (let i = 0; i < bucket.length; i += 1) {
+      const entry = bucket[i];
+      try {
+        const result = entry.interceptor({ ...payload, text: currentText });
+        if (result === null) return null;
+        if (typeof result === "string") currentText = result;
+      } catch (error) {
+        console.error(`[restty plugin] ${kind} interceptor error (${entry.pluginId}):`, error);
+      }
+    }
+    return currentText;
   }
 
   private onPluginEvent<E extends keyof ResttyPluginEvents>(
@@ -599,14 +743,14 @@ export class Restty {
   }
 
   private teardownPluginRuntime(runtime: ResttyPluginRuntime): void {
-    for (let i = 0; i < runtime.listenerDisposers.length; i += 1) {
+    for (let i = 0; i < runtime.disposers.length; i += 1) {
       try {
-        runtime.listenerDisposers[i]();
+        runtime.disposers[i]();
       } catch {
-        // ignore listener dispose errors
+        // ignore plugin dispose errors
       }
     }
-    runtime.listenerDisposers.length = 0;
+    runtime.disposers.length = 0;
     const cleanup = runtime.cleanup;
     runtime.cleanup = null;
     if (!cleanup) return;

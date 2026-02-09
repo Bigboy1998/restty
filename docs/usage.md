@@ -212,9 +212,13 @@ const logPlugin: ResttyPlugin = {
     const active = ctx.on("pane:active-changed", ({ paneId }) => {
       console.log("active pane", paneId);
     });
+    const outgoing = ctx.addInputInterceptor(({ text }) => text.replace(/\t/g, "  "));
+    const incoming = ctx.addOutputInterceptor(({ text }) => text);
     return () => {
       created.dispose();
       active.dispose();
+      outgoing.dispose();
+      incoming.dispose();
     };
   },
 };

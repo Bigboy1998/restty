@@ -9,6 +9,11 @@ export type {
   ResttyPluginContext,
   ResttyPluginDisposable,
   ResttyPluginEvents,
+  ResttyInputInterceptor,
+  ResttyInputInterceptorPayload,
+  ResttyInterceptorOptions,
+  ResttyOutputInterceptor,
+  ResttyOutputInterceptorPayload,
 } from "./app/restty";
 
 export {

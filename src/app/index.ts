@@ -81,6 +81,7 @@ export type {
   ResttyLocalFontSource,
   ResttyWasmLogListener,
   ResttyAppSession,
+  ResttyAppInputPayload,
   ResttyAppOptions,
   ResttyApp,
 } from "./types";
@@ -104,6 +105,11 @@ export type {
   ResttyPluginContext,
   ResttyPluginDisposable,
   ResttyPluginEvents,
+  ResttyInputInterceptor,
+  ResttyInputInterceptorPayload,
+  ResttyInterceptorOptions,
+  ResttyOutputInterceptor,
+  ResttyOutputInterceptorPayload,
 } from "./restty";
 
 function normalizeTouchSelectionMode(
@@ -211,6 +217,8 @@ type ResttyDebugWindow = Window &
 
 export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   const { canvas: canvasInput, imeInput: imeInputInput, elements, callbacks } = options;
+  const beforeInputHook = options.beforeInput;
+  const beforeRenderOutputHook = options.beforeRenderOutput;
   const session = options.session ?? getDefaultResttyAppSession();
   const textShaper = bundledTextShaper;
   if (!canvasInput) {
@@ -1679,15 +1687,17 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
 
   function sendKeyInput(text, source = "key") {
     if (!text) return;
+    const intercepted = runBeforeInputHook(text, source);
+    if (!intercepted) return;
     if (source !== "program" && (selectionState.active || selectionState.dragging)) {
       clearSelection();
     }
     if (ptyTransport.isConnected()) {
-      const payload = inputHandler.mapKeyForPty(text);
+      const payload = inputHandler.mapKeyForPty(intercepted);
       ptyTransport.sendInput(payload);
       return;
     }
-    sendInput(text, source);
+    sendInput(intercepted, source, { skipHooks: true });
   }
 
   function formatPasteText(text: string) {
@@ -7022,10 +7032,42 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
     return text.replace(/\r?\n/g, "\r\n");
   }
 
-  function sendInput(text, source = "program") {
+  function runBeforeInputHook(text: string, source: string): string | null {
+    if (!beforeInputHook) return text;
+    try {
+      const next = beforeInputHook({ text, source });
+      if (next === null) return null;
+      if (typeof next === "string") return next;
+      return text;
+    } catch (error) {
+      console.error("[restty] beforeInput hook error:", error);
+      return text;
+    }
+  }
+
+  function runBeforeRenderOutputHook(text: string, source: string): string | null {
+    if (!beforeRenderOutputHook) return text;
+    try {
+      const next = beforeRenderOutputHook({ text, source });
+      if (next === null) return null;
+      if (typeof next === "string") return next;
+      return text;
+    } catch (error) {
+      console.error("[restty] beforeRenderOutput hook error:", error);
+      return text;
+    }
+  }
+
+  function sendInput(text, source = "program", options: { skipHooks?: boolean } = {}) {
     if (!wasmReady || !wasm || !wasmHandle) return;
     if (!text) return;
-    const normalized = source === "pty" ? text : normalizeNewlines(text);
+    let intercepted = text;
+    if (!options.skipHooks) {
+      intercepted =
+        source === "pty" ? runBeforeRenderOutputHook(text, source) : runBeforeInputHook(text, source);
+    }
+    if (!intercepted) return;
+    const normalized = source === "pty" ? intercepted : normalizeNewlines(intercepted);
     if (source === "key") {
       const bytes = textEncoder.encode(normalized);
       const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(" ");
