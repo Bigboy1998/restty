@@ -187,8 +187,9 @@ function isSymbolCp(cp: number): boolean {
   const isBlockElement = cp >= 0x2580 && cp <= 0x259f;
   const isLegacyComputing = (cp >= 0x1fb00 && cp <= 0x1fbff) || (cp >= 0x1cc00 && cp <= 0x1cebf);
   const isPowerline = cp >= 0xe0b0 && cp <= 0xe0d7;
+  const isTransportControl = cp >= 0x23e9 && cp <= 0x23fa;
   const isGraphicsElement = isBoxDrawing || isBlockElement || isLegacyComputing || isPowerline;
-  return isPrivateUse || isGraphicsElement;
+  return isPrivateUse || isGraphicsElement || isTransportControl;
 }
 
 /**

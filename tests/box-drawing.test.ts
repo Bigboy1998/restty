@@ -78,6 +78,26 @@ function densestCol(bitmap: Uint8Array, width: number, height: number): number {
   return bestCol;
 }
 
+function hasInkNear(
+  bitmap: Uint8Array,
+  width: number,
+  height: number,
+  cx: number,
+  cy: number,
+  radius = 1,
+): boolean {
+  const x0 = Math.max(0, Math.floor(cx) - radius);
+  const y0 = Math.max(0, Math.floor(cy) - radius);
+  const x1 = Math.min(width - 1, Math.floor(cx) + radius);
+  const y1 = Math.min(height - 1, Math.floor(cy) + radius);
+  for (let y = y0; y <= y1; y += 1) {
+    for (let x = x0; x <= x1; x += 1) {
+      if ((bitmap[y * width + x] ?? 0) > 0) return true;
+    }
+  }
+  return false;
+}
+
 test("box drawing horizontal lines stay continuous across adjacent cells", () => {
   const color: Color = [1, 1, 1, 1];
   const sizes = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 21, 24, 27, 31, 33, 41];
@@ -161,4 +181,31 @@ test("both WebGPU and WebGL loops use the same procedural box drawing path", () 
   const source = readFileSync(appPath, "utf8");
   const matches = source.match(/drawBoxDrawing\(cp,\s*x,\s*rowY,\s*cellW,\s*cellH,\s*fg,\s*fgRectData\)/g) ?? [];
   expect(matches.length).toBe(2);
+});
+
+test("rounded corners connect to neighboring straight lines at cell boundaries", () => {
+  const color: Color = [1, 1, 1, 1];
+  const sizes = [7, 8, 9, 10, 11, 12, 13, 16, 19, 24, 31, 41];
+
+  for (const cellW of sizes) {
+    for (const cellH of sizes) {
+      const width = cellW * 2;
+      const height = cellH * 2;
+      const rects: number[] = [];
+
+      //   │
+      //   ╰─
+      drawBoxDrawing(0x2502, 0, 0, cellW, cellH, color, rects);
+      drawBoxDrawing(0x2570, 0, cellH, cellW, cellH, color, rects);
+      drawBoxDrawing(0x2500, cellW, cellH, cellW, cellH, color, rects);
+
+      const bitmap = rasterize(rects, width, height);
+      const seamTopX = cellW * 0.5;
+      const seamTopY = cellH;
+      const seamRightX = cellW;
+      const seamRightY = cellH * 1.5;
+      expect(hasInkNear(bitmap, width, height, seamTopX, seamTopY, 1)).toBe(true);
+      expect(hasInkNear(bitmap, width, height, seamRightX, seamRightY, 1)).toBe(true);
+    }
+  }
 });

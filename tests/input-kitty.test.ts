@@ -114,3 +114,21 @@ test("kitty report_alternate includes shifted alternate codepoint", () => {
   );
   expect(seq).toBe("\x1b[61:43;2u");
 });
+
+test("kitty suppresses lock keys unless report_all is enabled", () => {
+  const seq = encodeKeyEvent(
+    keyEvent({ key: "CapsLock" }),
+    undefined,
+    KITTY_FLAG_DISAMBIGUATE,
+  );
+  expect(seq).toBe("");
+});
+
+test("kitty report_all keeps lock keys available", () => {
+  const seq = encodeKeyEvent(
+    keyEvent({ key: "CapsLock" }),
+    undefined,
+    KITTY_FLAG_REPORT_ALL,
+  );
+  expect(seq).toBe("\x1b[57358u");
+});

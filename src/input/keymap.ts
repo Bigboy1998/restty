@@ -96,6 +96,8 @@ const KITTY_KEYPAD_BY_CODE: Record<string, KittyKey> = {
   NumpadEqual: { code: 57415, final: "u" },
 };
 
+const KITTY_LOCK_KEYS = new Set(["CapsLock", "NumLock", "ScrollLock"]);
+
 const UN_SHIFTED_CODE_BY_CODE: Record<string, string> = {
   Backquote: "`",
   Minus: "-",
@@ -384,6 +386,7 @@ function encodeKittyKeyEvent(event: KeyboardEvent, kittyFlags: number): string {
 
   const key = event.key ?? "";
   const special = KITTY_KEYPAD_BY_CODE[event.code || ""] ?? KITTY_SPECIAL_KEYS[key];
+  const isLockKey = KITTY_LOCK_KEYS.has(key);
   const hasText = key.length === 1;
   const hasTextModifiers = event.altKey || event.ctrlKey || event.metaKey;
   const eventType = kittyEventType(event, reportEvents);
@@ -398,6 +401,7 @@ function encodeKittyKeyEvent(event: KeyboardEvent, kittyFlags: number): string {
   if (isRelease && !reportEvents) return "";
   if (isRelease && isLegacyTextKey) return "";
   if (isRelease && isLegacyControlKey) return "";
+  if (isLockKey && !reportAll) return "";
 
   // Preserve user-typable defaults unless report_all or modifier semantics require CSI output.
   if (isLegacyTextKey) {

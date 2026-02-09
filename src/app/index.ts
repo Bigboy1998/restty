@@ -238,6 +238,10 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   const BACKGROUND_RENDER_FPS = 15;
   const GLYPH_SHAPE_CACHE_LIMIT = 12000;
   const FONT_PICK_CACHE_LIMIT = 16000;
+  const OVERLAY_SCROLLBAR_WIDTH_CSS_PX = 7;
+  const OVERLAY_SCROLLBAR_MARGIN_CSS_PX = 4;
+  const OVERLAY_SCROLLBAR_INSET_Y_CSS_PX = 2;
+  const OVERLAY_SCROLLBAR_MIN_THUMB_CSS_PX = 28;
 
   let paused = false;
   let backend = "none";
@@ -562,30 +566,29 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   };
 
   function computeOverlayScrollbarLayout(
-    rows: number,
-    cellW: number,
-    cellH: number,
     total: number,
     offset: number,
     len: number,
   ): OverlayScrollbarLayout | null {
     if (!(total > len && len > 0)) return null;
-    const trackHeight = rows * cellH;
-    const width = Math.max(10, Math.round(cellW * 0.9));
-    const margin = Math.max(6, Math.round(width * 0.5));
-    const insetY = Math.max(2, Math.round(cellH * 0.2));
-    const trackX = canvas.width - margin - width;
+    const dpr = Math.max(1, currentDpr || 1);
+    const width = Math.max(1, Math.round(OVERLAY_SCROLLBAR_WIDTH_CSS_PX * dpr));
+    const margin = Math.max(1, Math.round(OVERLAY_SCROLLBAR_MARGIN_CSS_PX * dpr));
+    const insetY = Math.max(0, Math.round(OVERLAY_SCROLLBAR_INSET_Y_CSS_PX * dpr));
+    const trackX = Math.max(0, canvas.width - margin - width);
     const trackY = insetY;
-    const trackH = Math.max(width, trackHeight - insetY * 2);
+    const trackH = Math.max(width, canvas.height - insetY * 2);
     const denom = Math.max(1, total - len);
-    const thumbH = Math.max(width, Math.round(trackH * (len / total)));
+    const dynamicThumbH = Math.round(trackH * (len / total));
+    const minThumbH = Math.max(width, Math.round(OVERLAY_SCROLLBAR_MIN_THUMB_CSS_PX * dpr));
+    const thumbH = Math.min(trackH, Math.max(minThumbH, dynamicThumbH));
     const thumbY = trackY + Math.round((offset / denom) * (trackH - thumbH));
     return { total, offset, len, denom, width, trackX, trackY, trackH, thumbY, thumbH };
   }
 
   function getOverlayScrollbarLayout(): OverlayScrollbarLayout | null {
     if (!showOverlayScrollbar || !wasmExports?.restty_scrollbar_total || !wasmHandle) return null;
-    if (!gridState.rows || !gridState.cellW || !gridState.cellH) return null;
+    if (!gridState.rows) return null;
     const total = wasmExports.restty_scrollbar_total(wasmHandle) || 0;
     const offset = wasmExports.restty_scrollbar_offset
       ? wasmExports.restty_scrollbar_offset(wasmHandle)
@@ -593,14 +596,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     const len = wasmExports.restty_scrollbar_len
       ? wasmExports.restty_scrollbar_len(wasmHandle)
       : gridState.rows;
-    return computeOverlayScrollbarLayout(
-      gridState.rows,
-      gridState.cellW,
-      gridState.cellH,
-      total,
-      offset,
-      len,
-    );
+    return computeOverlayScrollbarLayout(total, offset, len);
   }
 
   function isPointInScrollbarHitArea(layout: OverlayScrollbarLayout, x: number, y: number) {
@@ -667,15 +663,12 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
 
   function appendOverlayScrollbar(
     overlayData: number[],
-    rows: number,
-    cellW: number,
-    cellH: number,
     total: number,
     offset: number,
     len: number,
   ) {
     if (!showOverlayScrollbar) return;
-    const layout = computeOverlayScrollbarLayout(rows, cellW, cellH, total, offset, len);
+    const layout = computeOverlayScrollbarLayout(total, offset, len);
     if (!layout) return;
     const since = performance.now() - scrollbarState.lastInputAt;
     const fadeDelay = 160;
@@ -1550,6 +1543,9 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
 
   function sendKeyInput(text, source = "key") {
     if (!text) return;
+    if (source !== "program" && (selectionState.active || selectionState.dragging)) {
+      clearSelection();
+    }
     if (ptyTransport.isConnected()) {
       const payload = inputHandler.mapKeyForPty(text);
       ptyTransport.sendInput(payload);
@@ -1588,6 +1584,15 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
 
   function bindCanvasEvents() {
     if (!attachCanvasEvents) return;
+    const shouldRoutePointerToAppMouse = (shiftKey: boolean) => {
+      if (shiftKey) return false;
+      if (!inputHandler.isMouseActive()) return false;
+      return inputHandler.isAltScreen ? inputHandler.isAltScreen() : false;
+    };
+    // Prefer local drag-selection on primary mouse button; hold Alt to force
+    // sending primary-button mouse events to full-screen TUIs.
+    const shouldPreferLocalPrimarySelection = (event: PointerEvent) =>
+      !isTouchPointer(event) && event.button === 0 && !event.altKey;
     canvas.style.touchAction =
       touchSelectionMode === "long-press" || touchSelectionMode === "drag"
         ? "none"
@@ -1616,7 +1621,11 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
           }
         }
       }
-      if (inputHandler.sendMouseEvent("down", event)) {
+      if (
+        shouldRoutePointerToAppMouse(event.shiftKey) &&
+        !shouldPreferLocalPrimarySelection(event) &&
+        inputHandler.sendMouseEvent("down", event)
+      ) {
         event.preventDefault();
         canvas.setPointerCapture?.(event.pointerId);
         return;
@@ -1671,10 +1680,6 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         event.preventDefault();
         return;
       }
-      if (inputHandler.sendMouseEvent("move", event)) {
-        event.preventDefault();
-        return;
-      }
       if (isTouchPointer(event)) {
         if (touchSelectionState.pendingPointerId === event.pointerId) {
           const dx = event.clientX - touchSelectionState.pendingStartX;
@@ -1718,24 +1723,27 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         return;
       }
       const cell = normalizeSelectionCell(positionToCell(event));
-      if (!selectionState.dragging) {
-        updateLinkHover(cell);
+      if (selectionState.dragging) {
+        event.preventDefault();
+        selectionState.focus = cell;
+        updateLinkHover(null);
+        updateCanvasCursor();
+        needsRender = true;
         return;
       }
-      event.preventDefault();
-      selectionState.focus = cell;
-      updateLinkHover(null);
-      updateCanvasCursor();
-      needsRender = true;
+      if (
+        shouldRoutePointerToAppMouse(event.shiftKey) &&
+        inputHandler.sendMouseEvent("move", event)
+      ) {
+        event.preventDefault();
+        return;
+      }
+      updateLinkHover(cell);
     };
 
     const onPointerUp = (event: PointerEvent) => {
       if (scrollbarDragState.pointerId === event.pointerId) {
         scrollbarDragState.pointerId = null;
-        event.preventDefault();
-        return;
-      }
-      if (inputHandler.sendMouseEvent("up", event)) {
         event.preventDefault();
         return;
       }
@@ -1787,6 +1795,14 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
           needsRender = true;
         }
       } else {
+        if (
+          shouldRoutePointerToAppMouse(event.shiftKey) &&
+          !shouldPreferLocalPrimarySelection(event) &&
+          inputHandler.sendMouseEvent("up", event)
+        ) {
+          event.preventDefault();
+          return;
+        }
         updateLinkHover(cell);
       }
       if (
@@ -1821,9 +1837,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     };
 
     const onWheel = (event: WheelEvent) => {
-      const mouseActive = inputHandler.isMouseActive();
-      const altScreen = inputHandler.isAltScreen ? inputHandler.isAltScreen() : false;
-      if (mouseActive && altScreen && !event.shiftKey) {
+      if (shouldRoutePointerToAppMouse(event.shiftKey)) {
         if (inputHandler.sendMouseEvent("wheel", event)) {
           event.preventDefault();
           return;
@@ -3530,7 +3544,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
       isFocused = true;
       focusTypingInput();
       if (inputHandler?.isFocusReporting?.()) {
-        sendKeyInput("\x1b[I");
+        sendKeyInput("\x1b[I", "program");
       }
     };
     const handleBlur = () => {
@@ -3538,7 +3552,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         typeof document !== "undefined" && imeInput ? document.activeElement === imeInput : false;
       isFocused = stillFocused;
       if (!stillFocused && inputHandler?.isFocusReporting?.()) {
-        sendKeyInput("\x1b[O");
+        sendKeyInput("\x1b[O", "program");
       }
     };
     const handlePointerFocus = () => {
@@ -5177,11 +5191,20 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
             let gw = metrics.width * bitmapScale;
             let gh = metrics.height * bitmapScale;
             if (symbolLike && !glyphConstrained) {
-              const fitScale = gw > 0 && gh > 0 ? Math.min(1, maxWidth / gw, maxHeight / gh) : 1;
-              if (fitScale < 1) {
-                bitmapScale *= fitScale;
-                gw *= fitScale;
-                gh *= fitScale;
+              const scaleToFit = gw > 0 && gh > 0 ? Math.min(maxWidth / gw, maxHeight / gh) : 1;
+              if (scaleToFit < 1) {
+                bitmapScale *= scaleToFit;
+                gw *= scaleToFit;
+                gh *= scaleToFit;
+              } else if (symbolFont && item.shaped.glyphs.length === 1 && gh > 0) {
+                const targetHeight = Math.min(maxHeight, nerdMetrics.iconHeightSingle);
+                const growToHeight = targetHeight > 0 ? targetHeight / gh : 1;
+                const growScale = Math.min(scaleToFit, growToHeight);
+                if (growScale > 1) {
+                  bitmapScale *= growScale;
+                  gw *= growScale;
+                  gh *= growScale;
+                }
               }
               gw = Math.round(gw);
               gh = Math.round(gh);
@@ -5246,7 +5269,9 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
               symbolFont &&
               item.shaped.glyphs.length === 1
             ) {
+              const rowY = item.baseY - yPad - baselineOffset;
               x = item.x + (maxWidth - gw) * 0.5;
+              y = rowY + (cellH - gh) * 0.5;
             }
             if (!constrained && symbolLike && !symbolFont) {
               const rowY = item.baseY - yPad - baselineOffset;
@@ -5388,7 +5413,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         scrollbarState.lastOffset = offset;
         scrollbarState.lastLen = len;
       }
-      appendOverlayScrollbar(overlayData, rows, cellW, cellH, total, offset, len);
+      appendOverlayScrollbar(overlayData, total, offset, len);
     }
 
     webgpuUniforms[0] = canvas.width;
@@ -6229,7 +6254,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         scrollbarState.lastOffset = offset;
         scrollbarState.lastLen = len;
       }
-      appendOverlayScrollbar(overlayData, rows, cellW, cellH, total, offset, len);
+      appendOverlayScrollbar(overlayData, total, offset, len);
     }
 
     // Update glyph atlases for WebGL
@@ -6389,11 +6414,20 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
             let gw = metrics.width * bitmapScale;
             let gh = metrics.height * bitmapScale;
             if (symbolLike && !glyphConstrained) {
-              const fitScale = gw > 0 && gh > 0 ? Math.min(1, maxWidth / gw, maxHeight / gh) : 1;
-              if (fitScale < 1) {
-                bitmapScale *= fitScale;
-                gw *= fitScale;
-                gh *= fitScale;
+              const scaleToFit = gw > 0 && gh > 0 ? Math.min(maxWidth / gw, maxHeight / gh) : 1;
+              if (scaleToFit < 1) {
+                bitmapScale *= scaleToFit;
+                gw *= scaleToFit;
+                gh *= scaleToFit;
+              } else if (symbolFont && item.shaped.glyphs.length === 1 && gh > 0) {
+                const targetHeight = Math.min(maxHeight, nerdMetrics.iconHeightSingle);
+                const growToHeight = targetHeight > 0 ? targetHeight / gh : 1;
+                const growScale = Math.min(scaleToFit, growToHeight);
+                if (growScale > 1) {
+                  bitmapScale *= growScale;
+                  gw *= growScale;
+                  gh *= growScale;
+                }
               }
               gw = Math.round(gw);
               gh = Math.round(gh);
@@ -6456,7 +6490,9 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
               symbolFont &&
               item.shaped.glyphs.length === 1
             ) {
+              const rowY = item.baseY - yPad - baselineOffset;
               x = item.x + (maxWidth - gw) * 0.5;
+              y = rowY + (cellH - gh) * 0.5;
             }
             if (!constrained && symbolLike && !symbolFont) {
               const rowY = item.baseY - yPad - baselineOffset;
@@ -6677,7 +6713,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
       }
       appendLog(`[key] ${JSON.stringify(normalized)}${before}`);
     }
-    if (source !== "program" && (selectionState.active || selectionState.dragging)) {
+    if (source === "key" && (selectionState.active || selectionState.dragging)) {
       clearSelection();
     }
     if (source === "pty" && linkState.hoverId) updateLinkHover(null);

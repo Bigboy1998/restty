@@ -82,3 +82,35 @@ test("output filter tracks synchronized output mode without swallowing sequence"
   expect(filter.filter("\x1b[?2026l")).toBe("\x1b[?2026l");
   expect(filter.isSynchronizedOutput()).toBe(false);
 });
+
+test("output filter does not treat CSI ? 1048 as alt-screen", () => {
+  const filter = new OutputFilter({
+    getCursorPosition: () => ({ row: 1, col: 1 }),
+    sendReply: () => {},
+    mouse: {
+      handleModeSeq: () => false,
+    } as any,
+  });
+
+  expect(filter.isAltScreen()).toBe(false);
+  expect(filter.filter("\x1b[?1048h")).toBe("\x1b[?1048h");
+  expect(filter.isAltScreen()).toBe(false);
+  expect(filter.filter("\x1b[?1048l")).toBe("\x1b[?1048l");
+  expect(filter.isAltScreen()).toBe(false);
+});
+
+test("output filter tracks alt-screen with CSI ? 1049", () => {
+  const filter = new OutputFilter({
+    getCursorPosition: () => ({ row: 1, col: 1 }),
+    sendReply: () => {},
+    mouse: {
+      handleModeSeq: () => false,
+    } as any,
+  });
+
+  expect(filter.isAltScreen()).toBe(false);
+  expect(filter.filter("\x1b[?1049h")).toBe("\x1b[?1049h");
+  expect(filter.isAltScreen()).toBe(true);
+  expect(filter.filter("\x1b[?1049l")).toBe("\x1b[?1049l");
+  expect(filter.isAltScreen()).toBe(false);
+});

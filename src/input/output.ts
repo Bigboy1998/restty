@@ -315,7 +315,7 @@ export class OutputFilter {
       const altMode = parsePrivateModeSeq(seq);
       if (altMode) {
         const { enabled, codes } = altMode;
-        if (codes.some((code) => code === 47 || code === 1047 || code === 1048 || code === 1049)) {
+        if (codes.some((code) => code === 47 || code === 1047 || code === 1049)) {
           this.altScreen = enabled;
         }
       }

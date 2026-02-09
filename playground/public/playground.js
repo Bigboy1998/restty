@@ -147,11 +147,14 @@ function isPowerline(cp) {
 function isBraille(cp) {
   return cp >= 10240 && cp <= 10495;
 }
+function isTransportControlSymbol(cp) {
+  return cp >= 9193 && cp <= 9210;
+}
 function isGraphicsElement(cp) {
   return isBoxDrawing(cp) || isBlockElement(cp) || isLegacyComputing(cp) || isPowerline(cp);
 }
 function isSymbolCp(cp) {
-  return isPrivateUse(cp) || isGraphicsElement(cp);
+  return isPrivateUse(cp) || isGraphicsElement(cp) || isTransportControlSymbol(cp);
 }
 function applyAlpha(color, alpha) {
   return [color[0], color[1], color[2], color[3] * alpha];
@@ -302,8 +305,7 @@ function drawBlockElement(cp, x, y, cellW, cellH, color, out) {
 function drawBoxDrawing(cp, x, y, cellW, cellH, color, out) {
   const spec = BOX_LINE_MAP.get(cp);
   if (!spec) {
-    const minDim2 = Math.min(cellW, cellH);
-    const light2 = Math.max(1, Math.round(minDim2 * 0.08));
+    const light2 = Math.max(1, Math.round(cellH * 0.08));
     const heavy2 = Math.max(light2 + 1, Math.round(light2 * 1.8));
     const dashedH = (count, thickness) => {
       const gap2 = Math.max(1, Math.round(thickness));
@@ -337,39 +339,146 @@ function drawBoxDrawing(cp, x, y, cellW, cellH, color, out) {
         pushRectBox(out, px - thickness * 0.5, py - thickness * 0.5, thickness, thickness, color);
       }
     };
-    const drawArc = (corner) => {
-      const thickness = light2;
-      const halfThick = thickness * 0.5;
-      const cx2 = x + cellW * 0.5;
-      const cy2 = y + cellH * 0.5;
-      const r = Math.min(cellW, cellH) * 0.5;
-      const steps = Math.max(24, Math.round(r * 4));
+    const drawRoundedCorner = (cornerCp) => {
+      const thickness = Math.max(1, Math.round(light2));
+      const half = thickness * 0.5;
       const s = 0.25;
-      const cubicBezier = (x0, y0, cx1, cy1, cx22, cy22, x1, y1) => {
-        for (let i = 0;i <= steps; i++) {
-          const t = i / steps;
-          const mt = 1 - t;
-          const px = mt * mt * mt * x0 + 3 * mt * mt * t * cx1 + 3 * mt * t * t * cx22 + t * t * t * x1;
-          const py = mt * mt * mt * y0 + 3 * mt * mt * t * cy1 + 3 * mt * t * t * cy22 + t * t * t * y1;
-          pushRectBox(out, px - halfThick, py - halfThick, thickness, thickness, color);
-        }
+      const cx2 = x + Math.floor((cellW - thickness) * 0.5) + half;
+      const cy2 = y + Math.floor((cellH - thickness) * 0.5) + half;
+      const r = Math.min(cellW, cellH) * 0.5;
+      const p0 = { x: cx2, y };
+      const p1 = { x: cx2, y: cy2 - r };
+      const c1 = { x: cx2, y: cy2 - s * r };
+      const c2 = { x: cx2, y: cy2 };
+      const p2 = { x: cx2, y: cy2 };
+      const p3 = { x: cx2, y: cy2 };
+      let p4 = { x: x + cellW, y: cy2 };
+      switch (cornerCp) {
+        case 9581:
+          p0.y = y + cellH;
+          p1.y = cy2 + r;
+          c1.y = cy2 + s * r;
+          c2.x = cx2 + s * r;
+          p2.x = cx2 + r;
+          p3.x = cx2 + r;
+          p4 = { x: x + cellW, y: cy2 };
+          break;
+        case 9582:
+          p0.y = y + cellH;
+          p1.y = cy2 + r;
+          c1.y = cy2 + s * r;
+          c2.x = cx2 - s * r;
+          p2.x = cx2 - r;
+          p3.x = cx2 - r;
+          p4 = { x, y: cy2 };
+          break;
+        case 9583:
+          c2.x = cx2 - s * r;
+          p2.x = cx2 - r;
+          p3.x = cx2 - r;
+          p4 = { x, y: cy2 };
+          break;
+        case 9584:
+          c2.x = cx2 + s * r;
+          p2.x = cx2 + r;
+          p3.x = cx2 + r;
+          p4 = { x: x + cellW, y: cy2 };
+          break;
+      }
+      const segments = [];
+      const addSegment = (a, b) => {
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const len = Math.hypot(dx, dy);
+        if (len <= 0.000001)
+          return;
+        const ux = dx / len;
+        const uy = dy / len;
+        segments.push({ ax: a.x, ay: a.y, ux, uy, nx: -uy, ny: ux, len });
       };
-      if (corner === "br") {
-        pushRectBox(out, cx2 - halfThick, cy2 + r, thickness, y + cellH - (cy2 + r), color);
-        cubicBezier(cx2, cy2 + r, cx2, cy2 + s * r, cx2 + s * r, cy2, cx2 + r, cy2);
-        pushRectBox(out, cx2 + r, cy2 - halfThick, x + cellW - (cx2 + r), thickness, color);
-      } else if (corner === "bl") {
-        pushRectBox(out, cx2 - halfThick, cy2 + r, thickness, y + cellH - (cy2 + r), color);
-        cubicBezier(cx2, cy2 + r, cx2, cy2 + s * r, cx2 - s * r, cy2, cx2 - r, cy2);
-        pushRectBox(out, x, cy2 - halfThick, cx2 - r - x, thickness, color);
-      } else if (corner === "tl") {
-        pushRectBox(out, cx2 - halfThick, y, thickness, cy2 - r - y, color);
-        cubicBezier(cx2, cy2 - r, cx2, cy2 - s * r, cx2 - s * r, cy2, cx2 - r, cy2);
-        pushRectBox(out, x, cy2 - halfThick, cx2 - r - x, thickness, color);
-      } else {
-        pushRectBox(out, cx2 - halfThick, y, thickness, cy2 - r - y, color);
-        cubicBezier(cx2, cy2 - r, cx2, cy2 - s * r, cx2 + s * r, cy2, cx2 + r, cy2);
-        pushRectBox(out, cx2 + r, cy2 - halfThick, x + cellW - (cx2 + r), thickness, color);
+      const cubicPoint = (a, b, c, d, t) => {
+        const mt = 1 - t;
+        const mt2 = mt * mt;
+        const t2 = t * t;
+        return {
+          x: mt2 * mt * a.x + 3 * mt2 * t * b.x + 3 * mt * t2 * c.x + t2 * t * d.x,
+          y: mt2 * mt * a.y + 3 * mt2 * t * b.y + 3 * mt * t2 * c.y + t2 * t * d.y
+        };
+      };
+      const steps = Math.max(10, Math.round(Math.max(cellW, cellH) * 1.5));
+      const curvePoints = [];
+      for (let i = 0;i <= steps; i += 1) {
+        const t = i / steps;
+        curvePoints.push(cubicPoint(p1, c1, c2, p2, t));
+      }
+      addSegment(p0, p1);
+      for (let i = 1;i < curvePoints.length; i += 1) {
+        addSegment(curvePoints[i - 1], curvePoints[i]);
+      }
+      addSegment(p3, p4);
+      const minX = Math.max(Math.floor(x), Math.floor(Math.min(p0.x, p4.x, cx2 - r) - half - 1));
+      const maxX = Math.min(Math.ceil(x + cellW) - 1, Math.ceil(Math.max(p0.x, p4.x, cx2 + r) + half + 1));
+      const minY = Math.max(Math.floor(y), Math.floor(Math.min(p0.y, p4.y, cy2 - r) - half - 1));
+      const maxY = Math.min(Math.ceil(y + cellH) - 1, Math.ceil(Math.max(p0.y, p4.y, cy2 + r) + half + 1));
+      if (maxX < minX || maxY < minY)
+        return;
+      const antiAlias = Math.min(cellW, cellH) >= 22;
+      const sampleOffsets = antiAlias ? [
+        [0.25, 0.25],
+        [0.75, 0.25],
+        [0.25, 0.75],
+        [0.75, 0.75]
+      ] : [[0.5, 0.5]];
+      const sampleInsideStroke = (sx, sy) => {
+        for (const seg of segments) {
+          const rx = sx - seg.ax;
+          const ry = sy - seg.ay;
+          const along = rx * seg.ux + ry * seg.uy;
+          if (along < 0 || along > seg.len)
+            continue;
+          const perp = Math.abs(rx * seg.nx + ry * seg.ny);
+          if (perp <= half + 0.000001)
+            return true;
+        }
+        return false;
+      };
+      for (let py = minY;py <= maxY; py += 1) {
+        let runX = -1;
+        let runCoverage = 0;
+        for (let px = minX;px <= maxX; px += 1) {
+          let coverage = 0;
+          for (const [ox, oy] of sampleOffsets) {
+            if (sampleInsideStroke(px + ox, py + oy))
+              coverage += 1;
+          }
+          if (coverage > 0 && runX < 0) {
+            runX = px;
+            runCoverage = coverage;
+            continue;
+          }
+          if (coverage > 0 && coverage === runCoverage)
+            continue;
+          if (runX >= 0) {
+            const alphaColor = [
+              color[0],
+              color[1],
+              color[2],
+              color[3] * (runCoverage / sampleOffsets.length)
+            ];
+            pushRectBox(out, runX, py, px - runX, 1, alphaColor);
+            runX = coverage > 0 ? px : -1;
+            runCoverage = coverage;
+          }
+        }
+        if (runX >= 0) {
+          const alphaColor = [
+            color[0],
+            color[1],
+            color[2],
+            color[3] * (runCoverage / sampleOffsets.length)
+          ];
+          pushRectBox(out, runX, py, maxX - runX + 1, 1, alphaColor);
+        }
       }
     };
     switch (cp) {
@@ -410,16 +519,10 @@ function drawBoxDrawing(cp, x, y, cellW, cellH, color, out) {
         dashedV(2, heavy2);
         return true;
       case 9581:
-        drawArc("br");
-        return true;
       case 9582:
-        drawArc("bl");
-        return true;
       case 9583:
-        drawArc("tl");
-        return true;
       case 9584:
-        drawArc("tr");
+        drawRoundedCorner(cp);
         return true;
       case 9585:
         drawDiagonal("ur_ll");
@@ -436,8 +539,7 @@ function drawBoxDrawing(cp, x, y, cellW, cellH, color, out) {
     }
   }
   const [up, right, down, left] = spec;
-  const minDim = Math.min(cellW, cellH);
-  const light = Math.max(1, Math.round(minDim * 0.08));
+  const light = Math.max(1, Math.round(cellH * 0.08));
   const heavy = Math.max(light + 1, Math.round(light * 1.8));
   const gap = Math.max(1, Math.round(light));
   const cx = x + cellW * 0.5;
@@ -6957,6 +7059,7 @@ var KITTY_KEYPAD_BY_CODE = {
   NumpadEnter: { code: 57414, final: "u" },
   NumpadEqual: { code: 57415, final: "u" }
 };
+var KITTY_LOCK_KEYS = new Set(["CapsLock", "NumLock", "ScrollLock"]);
 var UN_SHIFTED_CODE_BY_CODE = {
   Backquote: "`",
   Minus: "-",
@@ -7228,6 +7331,7 @@ function encodeKittyKeyEvent(event, kittyFlags) {
   const disambiguate = (kittyFlags & KITTY_FLAG_DISAMBIGUATE) !== 0;
   const key = event.key ?? "";
   const special = KITTY_KEYPAD_BY_CODE[event.code || ""] ?? KITTY_SPECIAL_KEYS[key];
+  const isLockKey = KITTY_LOCK_KEYS.has(key);
   const hasText = key.length === 1;
   const hasTextModifiers = event.altKey || event.ctrlKey || event.metaKey;
   const eventType = kittyEventType(event, reportEvents);
@@ -7239,6 +7343,8 @@ function encodeKittyKeyEvent(event, kittyFlags) {
   if (isRelease && isLegacyTextKey)
     return "";
   if (isRelease && isLegacyControlKey)
+    return "";
+  if (isLockKey && !reportAll)
     return "";
   if (isLegacyTextKey) {
     return key;
@@ -7820,7 +7926,7 @@ class OutputFilter {
       const altMode = parsePrivateModeSeq(seq);
       if (altMode) {
         const { enabled, codes } = altMode;
-        if (codes.some((code) => code === 47 || code === 1047 || code === 1048 || code === 1049)) {
+        if (codes.some((code) => code === 47 || code === 1047 || code === 1049)) {
           this.altScreen = enabled;
         }
       }
@@ -49692,6 +49798,10 @@ function createResttyApp(options) {
   const BACKGROUND_RENDER_FPS = 15;
   const GLYPH_SHAPE_CACHE_LIMIT = 12000;
   const FONT_PICK_CACHE_LIMIT = 16000;
+  const OVERLAY_SCROLLBAR_WIDTH_CSS_PX = 7;
+  const OVERLAY_SCROLLBAR_MARGIN_CSS_PX = 4;
+  const OVERLAY_SCROLLBAR_INSET_Y_CSS_PX = 2;
+  const OVERLAY_SCROLLBAR_MIN_THUMB_CSS_PX = 28;
   let paused = false;
   let backend = "none";
   let preferredRenderer = options.renderer ?? "auto";
@@ -49969,30 +50079,32 @@ function createResttyApp(options) {
       y: (event.clientY - rect.top) * scaleY
     };
   }
-  function computeOverlayScrollbarLayout(rows, cellW, cellH, total, offset, len) {
+  function computeOverlayScrollbarLayout(total, offset, len) {
     if (!(total > len && len > 0))
       return null;
-    const trackHeight = rows * cellH;
-    const width = Math.max(10, Math.round(cellW * 0.9));
-    const margin = Math.max(6, Math.round(width * 0.5));
-    const insetY = Math.max(2, Math.round(cellH * 0.2));
-    const trackX = canvas.width - margin - width;
+    const dpr = Math.max(1, currentDpr || 1);
+    const width = Math.max(1, Math.round(OVERLAY_SCROLLBAR_WIDTH_CSS_PX * dpr));
+    const margin = Math.max(1, Math.round(OVERLAY_SCROLLBAR_MARGIN_CSS_PX * dpr));
+    const insetY = Math.max(0, Math.round(OVERLAY_SCROLLBAR_INSET_Y_CSS_PX * dpr));
+    const trackX = Math.max(0, canvas.width - margin - width);
     const trackY = insetY;
-    const trackH = Math.max(width, trackHeight - insetY * 2);
+    const trackH = Math.max(width, canvas.height - insetY * 2);
     const denom = Math.max(1, total - len);
-    const thumbH = Math.max(width, Math.round(trackH * (len / total)));
+    const dynamicThumbH = Math.round(trackH * (len / total));
+    const minThumbH = Math.max(width, Math.round(OVERLAY_SCROLLBAR_MIN_THUMB_CSS_PX * dpr));
+    const thumbH = Math.min(trackH, Math.max(minThumbH, dynamicThumbH));
     const thumbY = trackY + Math.round(offset / denom * (trackH - thumbH));
     return { total, offset, len, denom, width, trackX, trackY, trackH, thumbY, thumbH };
   }
   function getOverlayScrollbarLayout() {
     if (!showOverlayScrollbar || !wasmExports?.restty_scrollbar_total || !wasmHandle)
       return null;
-    if (!gridState.rows || !gridState.cellW || !gridState.cellH)
+    if (!gridState.rows)
       return null;
     const total = wasmExports.restty_scrollbar_total(wasmHandle) || 0;
     const offset = wasmExports.restty_scrollbar_offset ? wasmExports.restty_scrollbar_offset(wasmHandle) : 0;
     const len = wasmExports.restty_scrollbar_len ? wasmExports.restty_scrollbar_len(wasmHandle) : gridState.rows;
-    return computeOverlayScrollbarLayout(gridState.rows, gridState.cellW, gridState.cellH, total, offset, len);
+    return computeOverlayScrollbarLayout(total, offset, len);
   }
   function isPointInScrollbarHitArea(layout, x3, y) {
     const hitPadX = Math.max(3, Math.round(layout.width * 0.35));
@@ -50032,10 +50144,10 @@ function createResttyApp(options) {
       pushRectBox(out, x02 + inset, y02 + height - 1 - row, rowW, 1, color);
     }
   }
-  function appendOverlayScrollbar(overlayData, rows, cellW, cellH, total, offset, len) {
+  function appendOverlayScrollbar(overlayData, total, offset, len) {
     if (!showOverlayScrollbar)
       return;
-    const layout = computeOverlayScrollbarLayout(rows, cellW, cellH, total, offset, len);
+    const layout = computeOverlayScrollbarLayout(total, offset, len);
     if (!layout)
       return;
     const since = performance.now() - scrollbarState.lastInputAt;
@@ -50827,6 +50939,9 @@ function createResttyApp(options) {
   function sendKeyInput(text, source = "key") {
     if (!text)
       return;
+    if (source !== "program" && (selectionState.active || selectionState.dragging)) {
+      clearSelection();
+    }
     if (ptyTransport.isConnected()) {
       const payload = inputHandler.mapKeyForPty(text);
       ptyTransport.sendInput(payload);
@@ -50863,6 +50978,14 @@ function createResttyApp(options) {
   function bindCanvasEvents() {
     if (!attachCanvasEvents)
       return;
+    const shouldRoutePointerToAppMouse = (shiftKey) => {
+      if (shiftKey)
+        return false;
+      if (!inputHandler.isMouseActive())
+        return false;
+      return inputHandler.isAltScreen ? inputHandler.isAltScreen() : false;
+    };
+    const shouldPreferLocalPrimarySelection = (event) => !isTouchPointer(event) && event.button === 0 && !event.altKey;
     canvas.style.touchAction = touchSelectionMode === "long-press" || touchSelectionMode === "drag" ? "none" : "pan-y pinch-zoom";
     const onPointerDown = (event) => {
       if (!isTouchPointer(event) && event.button === 0) {
@@ -50882,7 +51005,7 @@ function createResttyApp(options) {
           }
         }
       }
-      if (inputHandler.sendMouseEvent("down", event)) {
+      if (shouldRoutePointerToAppMouse(event.shiftKey) && !shouldPreferLocalPrimarySelection(event) && inputHandler.sendMouseEvent("down", event)) {
         event.preventDefault();
         canvas.setPointerCapture?.(event.pointerId);
         return;
@@ -50933,10 +51056,6 @@ function createResttyApp(options) {
         event.preventDefault();
         return;
       }
-      if (inputHandler.sendMouseEvent("move", event)) {
-        event.preventDefault();
-        return;
-      }
       if (isTouchPointer(event)) {
         if (touchSelectionState.pendingPointerId === event.pointerId) {
           const dx = event.clientX - touchSelectionState.pendingStartX;
@@ -50974,23 +51093,23 @@ function createResttyApp(options) {
         return;
       }
       const cell = normalizeSelectionCell(positionToCell(event));
-      if (!selectionState.dragging) {
-        updateLinkHover(cell);
+      if (selectionState.dragging) {
+        event.preventDefault();
+        selectionState.focus = cell;
+        updateLinkHover(null);
+        updateCanvasCursor();
+        needsRender = true;
         return;
       }
-      event.preventDefault();
-      selectionState.focus = cell;
-      updateLinkHover(null);
-      updateCanvasCursor();
-      needsRender = true;
+      if (shouldRoutePointerToAppMouse(event.shiftKey) && inputHandler.sendMouseEvent("move", event)) {
+        event.preventDefault();
+        return;
+      }
+      updateLinkHover(cell);
     };
     const onPointerUp = (event) => {
       if (scrollbarDragState.pointerId === event.pointerId) {
         scrollbarDragState.pointerId = null;
-        event.preventDefault();
-        return;
-      }
-      if (inputHandler.sendMouseEvent("up", event)) {
         event.preventDefault();
         return;
       }
@@ -51032,6 +51151,10 @@ function createResttyApp(options) {
           needsRender = true;
         }
       } else {
+        if (shouldRoutePointerToAppMouse(event.shiftKey) && !shouldPreferLocalPrimarySelection(event) && inputHandler.sendMouseEvent("up", event)) {
+          event.preventDefault();
+          return;
+        }
         updateLinkHover(cell);
       }
       if (!selectionState.active && event.button === 0 && linkState.hoverUri) {
@@ -51060,9 +51183,7 @@ function createResttyApp(options) {
       }
     };
     const onWheel = (event) => {
-      const mouseActive = inputHandler.isMouseActive();
-      const altScreen = inputHandler.isAltScreen ? inputHandler.isAltScreen() : false;
-      if (mouseActive && altScreen && !event.shiftKey) {
+      if (shouldRoutePointerToAppMouse(event.shiftKey)) {
         if (inputHandler.sendMouseEvent("wheel", event)) {
           event.preventDefault();
           return;
@@ -52483,14 +52604,14 @@ function createResttyApp(options) {
       isFocused = true;
       focusTypingInput();
       if (inputHandler?.isFocusReporting?.()) {
-        sendKeyInput("\x1B[I");
+        sendKeyInput("\x1B[I", "program");
       }
     };
     const handleBlur = () => {
       const stillFocused = typeof document !== "undefined" && imeInput ? document.activeElement === imeInput : false;
       isFocused = stillFocused;
       if (!stillFocused && inputHandler?.isFocusReporting?.()) {
-        sendKeyInput("\x1B[O");
+        sendKeyInput("\x1B[O", "program");
       }
     };
     const handlePointerFocus = () => {
@@ -53938,11 +54059,20 @@ function createResttyApp(options) {
             let gw = metrics.width * bitmapScale;
             let gh = metrics.height * bitmapScale;
             if (symbolLike && !glyphConstrained) {
-              const fitScale = gw > 0 && gh > 0 ? Math.min(1, maxWidth / gw, maxHeight / gh) : 1;
-              if (fitScale < 1) {
-                bitmapScale *= fitScale;
-                gw *= fitScale;
-                gh *= fitScale;
+              const scaleToFit = gw > 0 && gh > 0 ? Math.min(maxWidth / gw, maxHeight / gh) : 1;
+              if (scaleToFit < 1) {
+                bitmapScale *= scaleToFit;
+                gw *= scaleToFit;
+                gh *= scaleToFit;
+              } else if (symbolFont && item.shaped.glyphs.length === 1 && gh > 0) {
+                const targetHeight = Math.min(maxHeight, nerdMetrics.iconHeightSingle);
+                const growToHeight = targetHeight > 0 ? targetHeight / gh : 1;
+                const growScale = Math.min(scaleToFit, growToHeight);
+                if (growScale > 1) {
+                  bitmapScale *= growScale;
+                  gw *= growScale;
+                  gh *= growScale;
+                }
               }
               gw = Math.round(gw);
               gh = Math.round(gh);
@@ -53982,7 +54112,9 @@ function createResttyApp(options) {
               }
             }
             if (!glyphConstrained && !constrained && symbolFont && item.shaped.glyphs.length === 1) {
+              const rowY = item.baseY - yPad - baselineOffset;
               x3 = item.x + (maxWidth - gw) * 0.5;
+              y = rowY + (cellH - gh) * 0.5;
             }
             if (!constrained && symbolLike && !symbolFont) {
               const rowY = item.baseY - yPad - baselineOffset;
@@ -54078,7 +54210,7 @@ function createResttyApp(options) {
         scrollbarState.lastOffset = offset;
         scrollbarState.lastLen = len;
       }
-      appendOverlayScrollbar(overlayData, rows, cellW, cellH, total, offset, len);
+      appendOverlayScrollbar(overlayData, total, offset, len);
     }
     webgpuUniforms[0] = canvas.width;
     webgpuUniforms[1] = canvas.height;
@@ -54768,7 +54900,7 @@ function createResttyApp(options) {
         scrollbarState.lastOffset = offset;
         scrollbarState.lastLen = len;
       }
-      appendOverlayScrollbar(overlayData, rows, cellW, cellH, total, offset, len);
+      appendOverlayScrollbar(overlayData, total, offset, len);
     }
     for (const [fontIndex, neededIds] of neededGlyphIdsByFont.entries()) {
       const fontEntry = fontState.fonts[fontIndex];
@@ -54905,11 +55037,20 @@ function createResttyApp(options) {
             let gw = metrics.width * bitmapScale;
             let gh = metrics.height * bitmapScale;
             if (symbolLike && !glyphConstrained) {
-              const fitScale = gw > 0 && gh > 0 ? Math.min(1, maxWidth / gw, maxHeight / gh) : 1;
-              if (fitScale < 1) {
-                bitmapScale *= fitScale;
-                gw *= fitScale;
-                gh *= fitScale;
+              const scaleToFit = gw > 0 && gh > 0 ? Math.min(maxWidth / gw, maxHeight / gh) : 1;
+              if (scaleToFit < 1) {
+                bitmapScale *= scaleToFit;
+                gw *= scaleToFit;
+                gh *= scaleToFit;
+              } else if (symbolFont && item.shaped.glyphs.length === 1 && gh > 0) {
+                const targetHeight = Math.min(maxHeight, nerdMetrics.iconHeightSingle);
+                const growToHeight = targetHeight > 0 ? targetHeight / gh : 1;
+                const growScale = Math.min(scaleToFit, growToHeight);
+                if (growScale > 1) {
+                  bitmapScale *= growScale;
+                  gw *= growScale;
+                  gh *= growScale;
+                }
               }
               gw = Math.round(gw);
               gh = Math.round(gh);
@@ -54947,7 +55088,9 @@ function createResttyApp(options) {
               }
             }
             if (!glyphConstrained && !constrained && symbolFont && item.shaped.glyphs.length === 1) {
+              const rowY = item.baseY - yPad - baselineOffset;
               x3 = item.x + (maxWidth - gw) * 0.5;
+              y = rowY + (cellH - gh) * 0.5;
             }
             if (!constrained && symbolLike && !symbolFont) {
               const rowY = item.baseY - yPad - baselineOffset;
@@ -55144,7 +55287,7 @@ function createResttyApp(options) {
       }
       appendLog(`[key] ${JSON.stringify(normalized)}${before}`);
     }
-    if (source !== "program" && (selectionState.active || selectionState.dragging)) {
+    if (source === "key" && (selectionState.active || selectionState.dragging)) {
       clearSelection();
     }
     if (source === "pty" && linkState.hoverId)
@@ -58160,5 +58303,5 @@ if (firstState) {
 }
 queueResizeAllPanes();
 
-//# debugId=1ACCC011E3F2B2D664756E2164756E21
+//# debugId=C54AAB6C2897DAB764756E2164756E21
 //# sourceMappingURL=app.js.map
