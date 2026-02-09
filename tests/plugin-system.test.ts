@@ -278,10 +278,14 @@ test("pluginInfo reports metadata, status, and active disposer counts", async ()
       const event = ctx.on("pane:resized", () => {});
       const input = ctx.addInputInterceptor(({ text }) => text);
       const output = ctx.addOutputInterceptor(({ text }) => text);
+      const lifecycle = ctx.addLifecycleHook(() => {});
+      const render = ctx.addRenderHook(() => {});
       disposeRuntime = () => {
         event.dispose();
         input.dispose();
         output.dispose();
+        lifecycle.dispose();
+        render.dispose();
       };
       return () => disposeRuntime?.();
     },
@@ -296,6 +300,8 @@ test("pluginInfo reports metadata, status, and active disposer counts", async ()
   expect(info?.listeners).toBe(1);
   expect(info?.inputInterceptors).toBe(1);
   expect(info?.outputInterceptors).toBe(1);
+  expect(info?.lifecycleHooks).toBe(1);
+  expect(info?.renderHooks).toBe(1);
   expect(Array.isArray(restty.pluginInfo())).toBe(true);
 
   disposeRuntime?.();
@@ -303,6 +309,129 @@ test("pluginInfo reports metadata, status, and active disposer counts", async ()
   expect(afterManualDispose?.listeners).toBe(0);
   expect(afterManualDispose?.inputInterceptors).toBe(0);
   expect(afterManualDispose?.outputInterceptors).toBe(0);
+  expect(afterManualDispose?.lifecycleHooks).toBe(0);
+  expect(afterManualDispose?.renderHooks).toBe(0);
+});
+
+test("manifest registry loading activates plugins and returns per-entry status", async () => {
+  const restty = createRestty();
+  restty.createInitialPane();
+  let seenContextOptions: unknown = null;
+  let seenActivationOptions: unknown = null;
+
+  const results = await restty.loadPlugins(
+    [
+      { id: "plugin/manifest", options: { rewrite: true } },
+      { id: "plugin/disabled", enabled: false },
+      { id: "plugin/missing" },
+      { id: "plugin/error" },
+      { id: "plugin/mismatch" },
+    ],
+    {
+      "plugin/manifest": () => ({
+        id: "plugin/manifest",
+        activate(ctx, options) {
+          seenContextOptions = ctx.options;
+          seenActivationOptions = options;
+          const d = ctx.addInputInterceptor(({ text }) => `${text}!`);
+          return () => d.dispose();
+        },
+      }),
+      "plugin/error": () => {
+        throw new Error("registry exploded");
+      },
+      "plugin/mismatch": {
+        id: "plugin/other-id",
+        activate() {},
+      },
+    },
+  );
+
+  expect(results).toEqual([
+    { id: "plugin/manifest", status: "loaded", error: null },
+    { id: "plugin/disabled", status: "skipped", error: null },
+    {
+      id: "plugin/missing",
+      status: "missing",
+      error: "Restty plugin plugin/missing was not found in registry",
+    },
+    { id: "plugin/error", status: "failed", error: "registry exploded" },
+    {
+      id: "plugin/mismatch",
+      status: "failed",
+      error: "Restty plugin registry entry plugin/mismatch resolved to id plugin/other-id",
+    },
+  ]);
+
+  expect(seenContextOptions).toEqual({ rewrite: true });
+  expect(seenActivationOptions).toEqual({ rewrite: true });
+  restty.sendInput("ok");
+  expect(activeWrites(restty)).toEqual([{ kind: "input", text: "ok!", source: "program" }]);
+
+  const missingInfo = restty.pluginInfo("plugin/missing");
+  expect(missingInfo?.active).toBe(false);
+  expect(missingInfo?.lastError).toContain("not found in registry");
+});
+
+test("lifecycle and render hooks observe extension points beyond text interceptors", async () => {
+  const restty = createRestty();
+  const lifecycleEvents: string[] = [];
+  const renderEvents: Array<{ phase: string; text: string; dropped: boolean }> = [];
+
+  await restty.use({
+    id: "plugin/hooks",
+    activate(ctx) {
+      const lifecycle = ctx.addLifecycleHook((payload) => {
+        lifecycleEvents.push(
+          `${payload.phase}:${payload.action}:${String(payload.paneId ?? payload.sourcePaneId ?? "none")}`,
+        );
+      });
+      const render = ctx.addRenderHook((payload) => {
+        renderEvents.push({ phase: payload.phase, text: payload.text, dropped: payload.dropped });
+      });
+      const output = ctx.addOutputInterceptor(({ text }) => {
+        if (text === "drop") return null;
+        return `${text}!`;
+      });
+      return () => {
+        lifecycle.dispose();
+        render.dispose();
+        output.dispose();
+      };
+    },
+  });
+
+  const first = restty.createInitialPane();
+  const second = restty.splitPane(first.id, "vertical");
+  restty.setActivePane(first.id);
+  restty.markPaneFocused(first.id);
+  restty.connectPty();
+  restty.disconnectPty();
+  restty.resize(100, 30);
+  restty.focus();
+  restty.blur();
+  restty.sendInput("ok", "pty");
+  restty.sendInput("drop", "pty");
+  if (second) {
+    restty.closePane(second.id);
+  }
+
+  expect(lifecycleEvents).toContain("before:create-initial-pane:none");
+  expect(lifecycleEvents).toContain("after:create-initial-pane:1");
+  expect(lifecycleEvents).toContain("before:split-pane:1");
+  expect(lifecycleEvents).toContain("before:connect-pty:1");
+  expect(lifecycleEvents).toContain("after:disconnect-pty:1");
+  expect(lifecycleEvents).toContain("after:resize:1");
+  expect(lifecycleEvents).toContain("after:focus:1");
+  expect(lifecycleEvents).toContain("after:blur:1");
+  expect(lifecycleEvents).toContain("after:close-pane:2");
+
+  expect(renderEvents).toEqual([
+    { phase: "before", text: "ok", dropped: false },
+    { phase: "after", text: "ok!", dropped: false },
+    { phase: "before", text: "drop", dropped: false },
+    { phase: "after", text: "drop", dropped: true },
+  ]);
 });
 
 test("plugin events are emitted for pane lifecycle + focus/blur/resize", async () => {

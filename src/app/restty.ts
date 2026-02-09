@@ -48,6 +48,33 @@ export type ResttyPluginInfo = {
   listeners: number;
   inputInterceptors: number;
   outputInterceptors: number;
+  lifecycleHooks: number;
+  renderHooks: number;
+};
+
+/** Declarative plugin manifest entry for registry-based loading. */
+export type ResttyPluginManifestEntry = {
+  id: string;
+  enabled?: boolean;
+  options?: unknown;
+};
+
+/** Provider entry for plugin registry lookups. */
+export type ResttyPluginRegistryEntry = ResttyPlugin | (() => ResttyPlugin | Promise<ResttyPlugin>);
+
+/** Registry shape accepted by loadPlugins. */
+export type ResttyPluginRegistry =
+  | ReadonlyMap<string, ResttyPluginRegistryEntry>
+  | Record<string, ResttyPluginRegistryEntry>;
+
+/** Status for manifest-driven plugin load attempts. */
+export type ResttyPluginLoadStatus = "loaded" | "skipped" | "missing" | "failed";
+
+/** Result row returned by loadPlugins. */
+export type ResttyPluginLoadResult = {
+  id: string;
+  status: ResttyPluginLoadStatus;
+  error: string | null;
 };
 
 /** Event payloads emitted by the Restty plugin host. */
@@ -100,6 +127,46 @@ export type ResttyOutputInterceptor = (
   payload: ResttyOutputInterceptorPayload,
 ) => string | null | void;
 
+/** Payload passed to lifecycle hooks registered by plugins. */
+export type ResttyLifecycleHookPayload = {
+  phase: "before" | "after";
+  action:
+    | "create-initial-pane"
+    | "split-active-pane"
+    | "split-pane"
+    | "close-pane"
+    | "set-active-pane"
+    | "mark-pane-focused"
+    | "connect-pty"
+    | "disconnect-pty"
+    | "resize"
+    | "focus"
+    | "blur";
+  paneId?: number | null;
+  sourcePaneId?: number;
+  createdPaneId?: number | null;
+  direction?: ResttyPaneSplitDirection;
+  cols?: number;
+  rows?: number;
+  ok?: boolean;
+  error?: string | null;
+};
+
+/** Lifecycle hook contract. */
+export type ResttyLifecycleHook = (payload: ResttyLifecycleHookPayload) => void;
+
+/** Payload passed to render hooks registered by plugins. */
+export type ResttyRenderHookPayload = {
+  phase: "before" | "after";
+  paneId: number;
+  text: string;
+  source: string;
+  dropped: boolean;
+};
+
+/** Render hook contract. */
+export type ResttyRenderHook = (payload: ResttyRenderHookPayload) => void;
+
 /** Shared options for interceptor ordering. */
 export type ResttyInterceptorOptions = {
   priority?: number;
@@ -108,6 +175,7 @@ export type ResttyInterceptorOptions = {
 /** Context object provided to each plugin on activation. */
 export type ResttyPluginContext = {
   restty: Restty;
+  options: unknown;
   panes: () => ResttyPaneHandle[];
   pane: (id: number) => ResttyPaneHandle | null;
   activePane: () => ResttyPaneHandle | null;
@@ -124,6 +192,14 @@ export type ResttyPluginContext = {
     interceptor: ResttyOutputInterceptor,
     options?: ResttyInterceptorOptions,
   ) => ResttyPluginDisposable;
+  addLifecycleHook: (
+    hook: ResttyLifecycleHook,
+    options?: ResttyInterceptorOptions,
+  ) => ResttyPluginDisposable;
+  addRenderHook: (
+    hook: ResttyRenderHook,
+    options?: ResttyInterceptorOptions,
+  ) => ResttyPluginDisposable;
 };
 
 /** Plugin contract for extending Restty behavior. */
@@ -132,10 +208,18 @@ export type ResttyPlugin = {
   version?: string;
   apiVersion?: number;
   requires?: ResttyPluginRequires;
-  activate: (context: ResttyPluginContext) => ResttyPluginCleanup | Promise<ResttyPluginCleanup>;
+  activate: (
+    context: ResttyPluginContext,
+    options?: unknown,
+  ) => ResttyPluginCleanup | Promise<ResttyPluginCleanup>;
 };
 
-type ResttyPluginRuntimeDisposerKind = "event" | "input-interceptor" | "output-interceptor";
+type ResttyPluginRuntimeDisposerKind =
+  | "event"
+  | "input-interceptor"
+  | "output-interceptor"
+  | "lifecycle-hook"
+  | "render-hook";
 type ResttyPluginRuntimeDisposer = {
   kind: ResttyPluginRuntimeDisposerKind;
   active: boolean;
@@ -146,6 +230,7 @@ type ResttyPluginRuntime = {
   plugin: ResttyPlugin;
   cleanup: (() => void) | null;
   activatedAt: number;
+  options: unknown;
   disposers: Array<ResttyPluginRuntimeDisposer>;
 };
 
@@ -324,6 +409,8 @@ export class Restty {
     [];
   private readonly outputInterceptors: Array<ResttyRegisteredInterceptor<ResttyOutputInterceptor>> =
     [];
+  private readonly lifecycleHooks: Array<ResttyRegisteredInterceptor<ResttyLifecycleHook>> = [];
+  private readonly renderHooks: Array<ResttyRegisteredInterceptor<ResttyRenderHook>> = [];
   private nextInterceptorId = 1;
   private nextInterceptorOrder = 1;
 
@@ -355,10 +442,34 @@ export class Restty {
           return this.applyInputInterceptors(context.id, current, source);
         },
         beforeRenderOutput: ({ text, source }) => {
+          this.runRenderHooks({
+            phase: "before",
+            paneId: context.id,
+            text,
+            source,
+            dropped: false,
+          });
           const maybeUserText = resolvedBeforeRenderOutput?.({ text, source });
-          if (maybeUserText === null) return null;
+          if (maybeUserText === null) {
+            this.runRenderHooks({
+              phase: "after",
+              paneId: context.id,
+              text,
+              source,
+              dropped: true,
+            });
+            return null;
+          }
           const current = maybeUserText === undefined ? text : maybeUserText;
-          return this.applyOutputInterceptors(context.id, current, source);
+          const next = this.applyOutputInterceptors(context.id, current, source);
+          this.runRenderHooks({
+            phase: "after",
+            paneId: context.id,
+            text: next === null ? current : next,
+            source,
+            dropped: next === null,
+          });
+          return next;
         },
       };
     };
@@ -395,7 +506,7 @@ export class Restty {
     if (createInitialPane) {
       const focus =
         typeof createInitialPane === "object" ? (createInitialPane.focus ?? true) : true;
-      this.paneManager.createInitialPane({ focus });
+      this.createInitialPane({ focus });
     }
   }
 
@@ -454,19 +565,66 @@ export class Restty {
   }
 
   createInitialPane(options?: { focus?: boolean }): ResttyManagedAppPane {
-    return this.paneManager.createInitialPane(options);
+    this.runLifecycleHooks({ phase: "before", action: "create-initial-pane" });
+    const pane = this.paneManager.createInitialPane(options);
+    this.runLifecycleHooks({
+      phase: "after",
+      action: "create-initial-pane",
+      paneId: pane.id,
+      ok: true,
+    });
+    return pane;
   }
 
   splitActivePane(direction: ResttyPaneSplitDirection): ResttyManagedAppPane | null {
-    return this.paneManager.splitActivePane(direction);
+    const sourcePaneId = this.getActivePane()?.id ?? null;
+    this.runLifecycleHooks({
+      phase: "before",
+      action: "split-active-pane",
+      paneId: sourcePaneId,
+      direction,
+    });
+    const pane = this.paneManager.splitActivePane(direction);
+    this.runLifecycleHooks({
+      phase: "after",
+      action: "split-active-pane",
+      sourcePaneId: sourcePaneId ?? undefined,
+      createdPaneId: pane?.id ?? null,
+      direction,
+      ok: !!pane,
+    });
+    return pane;
   }
 
   splitPane(id: number, direction: ResttyPaneSplitDirection): ResttyManagedAppPane | null {
-    return this.paneManager.splitPane(id, direction);
+    this.runLifecycleHooks({
+      phase: "before",
+      action: "split-pane",
+      paneId: id,
+      direction,
+    });
+    const pane = this.paneManager.splitPane(id, direction);
+    this.runLifecycleHooks({
+      phase: "after",
+      action: "split-pane",
+      sourcePaneId: id,
+      createdPaneId: pane?.id ?? null,
+      direction,
+      ok: !!pane,
+    });
+    return pane;
   }
 
   closePane(id: number): boolean {
-    return this.paneManager.closePane(id);
+    this.runLifecycleHooks({ phase: "before", action: "close-pane", paneId: id });
+    const ok = this.paneManager.closePane(id);
+    this.runLifecycleHooks({
+      phase: "after",
+      action: "close-pane",
+      paneId: id,
+      ok,
+    });
+    return ok;
   }
 
   getPaneStyleOptions(): Readonly<Required<ResttyManagedPaneStyleOptions>> {
@@ -478,11 +636,35 @@ export class Restty {
   }
 
   setActivePane(id: number, options?: { focus?: boolean }): void {
+    this.runLifecycleHooks({
+      phase: "before",
+      action: "set-active-pane",
+      paneId: id,
+    });
     this.paneManager.setActivePane(id, options);
+    const activePaneId = this.getActivePane()?.id ?? null;
+    this.runLifecycleHooks({
+      phase: "after",
+      action: "set-active-pane",
+      paneId: activePaneId,
+      ok: activePaneId === id,
+    });
   }
 
   markPaneFocused(id: number, options?: { focus?: boolean }): void {
+    this.runLifecycleHooks({
+      phase: "before",
+      action: "mark-pane-focused",
+      paneId: id,
+    });
     this.paneManager.markPaneFocused(id, options);
+    const focusedPaneId = this.getFocusedPane()?.id ?? null;
+    this.runLifecycleHooks({
+      phase: "after",
+      action: "mark-pane-focused",
+      paneId: focusedPaneId,
+      ok: focusedPaneId === id,
+    });
   }
 
   requestLayoutSync(): void {
@@ -493,7 +675,7 @@ export class Restty {
     this.paneManager.hideContextMenu();
   }
 
-  async use(plugin: ResttyPlugin): Promise<void> {
+  async use(plugin: ResttyPlugin, options?: unknown): Promise<void> {
     if (!plugin || typeof plugin !== "object") {
       throw new Error("Restty plugin must be an object");
     }
@@ -524,6 +706,7 @@ export class Restty {
       plugin: this.normalizePluginMetadata(plugin, pluginId),
       cleanup: null,
       activatedAt: Date.now(),
+      options,
       disposers: [],
     };
     this.pluginDiagnostics.set(pluginId, {
@@ -539,7 +722,10 @@ export class Restty {
     });
     this.pluginRuntimes.set(pluginId, runtime);
     try {
-      const cleanup = await runtime.plugin.activate(this.createPluginContext(runtime));
+      const cleanup = await runtime.plugin.activate(
+        this.createPluginContext(runtime),
+        runtime.options,
+      );
       runtime.cleanup = this.normalizePluginCleanup(cleanup);
       runtime.activatedAt = Date.now();
       this.updatePluginDiagnostic(pluginId, {
@@ -558,6 +744,67 @@ export class Restty {
       });
       throw error;
     }
+  }
+
+  async loadPlugins(
+    manifest: ReadonlyArray<ResttyPluginManifestEntry>,
+    registry: ResttyPluginRegistry,
+  ): Promise<ResttyPluginLoadResult[]> {
+    const results: ResttyPluginLoadResult[] = [];
+    for (let i = 0; i < manifest.length; i += 1) {
+      const item = manifest[i];
+      const pluginId = item.id?.trim?.() ?? "";
+      if (!pluginId) {
+        results.push({
+          id: "",
+          status: "failed",
+          error: "Restty plugin manifest entry is missing id",
+        });
+        continue;
+      }
+      if (item.enabled === false) {
+        results.push({ id: pluginId, status: "skipped", error: null });
+        continue;
+      }
+
+      const entry = this.lookupPluginRegistryEntry(registry, pluginId);
+      if (!entry) {
+        const message = `Restty plugin ${pluginId} was not found in registry`;
+        this.setPluginLoadError(pluginId, message);
+        results.push({ id: pluginId, status: "missing", error: message });
+        continue;
+      }
+
+      let plugin: ResttyPlugin;
+      try {
+        plugin = await this.resolvePluginRegistryEntry(entry);
+      } catch (error) {
+        const message = this.errorToMessage(error);
+        this.setPluginLoadError(pluginId, message);
+        results.push({ id: pluginId, status: "failed", error: message });
+        continue;
+      }
+
+      const resolvedId = plugin.id?.trim?.() ?? "";
+      if (resolvedId !== pluginId) {
+        const message = `Restty plugin registry entry ${pluginId} resolved to id ${resolvedId || "(empty)"}`;
+        this.setPluginLoadError(pluginId, message);
+        results.push({ id: pluginId, status: "failed", error: message });
+        continue;
+      }
+
+      try {
+        await this.use(plugin, item.options);
+        results.push({ id: pluginId, status: "loaded", error: null });
+      } catch (error) {
+        results.push({
+          id: pluginId,
+          status: "failed",
+          error: this.errorToMessage(error),
+        });
+      }
+    }
+    return results;
   }
 
   unuse(pluginId: string): boolean {
@@ -605,11 +852,35 @@ export class Restty {
   }
 
   connectPty(url = ""): void {
-    this.requireActivePaneHandle().connectPty(url);
+    const pane = this.requireActivePaneHandle();
+    this.runLifecycleHooks({
+      phase: "before",
+      action: "connect-pty",
+      paneId: pane.id,
+    });
+    pane.connectPty(url);
+    this.runLifecycleHooks({
+      phase: "after",
+      action: "connect-pty",
+      paneId: pane.id,
+      ok: true,
+    });
   }
 
   disconnectPty(): void {
-    this.requireActivePaneHandle().disconnectPty();
+    const pane = this.requireActivePaneHandle();
+    this.runLifecycleHooks({
+      phase: "before",
+      action: "disconnect-pty",
+      paneId: pane.id,
+    });
+    pane.disconnectPty();
+    this.runLifecycleHooks({
+      phase: "after",
+      action: "disconnect-pty",
+      paneId: pane.id,
+      ok: true,
+    });
   }
 
   isPtyConnected(): boolean {
@@ -674,19 +945,56 @@ export class Restty {
 
   resize(cols: number, rows: number): void {
     const pane = this.requireActivePaneHandle();
+    this.runLifecycleHooks({
+      phase: "before",
+      action: "resize",
+      paneId: pane.id,
+      cols,
+      rows,
+    });
     pane.resize(cols, rows);
+    this.runLifecycleHooks({
+      phase: "after",
+      action: "resize",
+      paneId: pane.id,
+      cols,
+      rows,
+      ok: true,
+    });
     this.emitPluginEvent("pane:resized", { paneId: pane.id, cols, rows });
   }
 
   focus(): void {
     const pane = this.requireActivePaneHandle();
+    this.runLifecycleHooks({
+      phase: "before",
+      action: "focus",
+      paneId: pane.id,
+    });
     pane.focus();
+    this.runLifecycleHooks({
+      phase: "after",
+      action: "focus",
+      paneId: pane.id,
+      ok: true,
+    });
     this.emitPluginEvent("pane:focused", { paneId: pane.id });
   }
 
   blur(): void {
     const pane = this.requireActivePaneHandle();
+    this.runLifecycleHooks({
+      phase: "before",
+      action: "blur",
+      paneId: pane.id,
+    });
     pane.blur();
+    this.runLifecycleHooks({
+      phase: "after",
+      action: "blur",
+      paneId: pane.id,
+      ok: true,
+    });
     this.emitPluginEvent("pane:blurred", { paneId: pane.id });
   }
 
@@ -719,6 +1027,7 @@ export class Restty {
   private createPluginContext(runtime: ResttyPluginRuntime): ResttyPluginContext {
     return {
       restty: this,
+      options: runtime.options,
       panes: () => this.panes(),
       pane: (id: number) => this.pane(id),
       activePane: () => this.activePane(),
@@ -750,6 +1059,24 @@ export class Restty {
             runtime,
             "output-interceptor",
             this.addOutputInterceptor(runtime.plugin.id, interceptor, options),
+          ),
+        };
+      },
+      addLifecycleHook: (hook, options) => {
+        return {
+          dispose: this.attachRuntimeDisposer(
+            runtime,
+            "lifecycle-hook",
+            this.addLifecycleHook(runtime.plugin.id, hook, options),
+          ),
+        };
+      },
+      addRenderHook: (hook, options) => {
+        return {
+          dispose: this.attachRuntimeDisposer(
+            runtime,
+            "render-hook",
+            this.addRenderHook(runtime.plugin.id, hook, options),
           ),
         };
       },
@@ -790,6 +1117,22 @@ export class Restty {
     return this.registerInterceptor(this.outputInterceptors, pluginId, interceptor, options);
   }
 
+  private addLifecycleHook(
+    pluginId: string,
+    hook: ResttyLifecycleHook,
+    options?: ResttyInterceptorOptions,
+  ): () => void {
+    return this.registerInterceptor(this.lifecycleHooks, pluginId, hook, options);
+  }
+
+  private addRenderHook(
+    pluginId: string,
+    hook: ResttyRenderHook,
+    options?: ResttyInterceptorOptions,
+  ): () => void {
+    return this.registerInterceptor(this.renderHooks, pluginId, hook, options);
+  }
+
   private registerInterceptor<T extends (payload: unknown) => string | null | void>(
     bucket: Array<ResttyRegisteredInterceptor<T>>,
     pluginId: string,
@@ -824,6 +1167,14 @@ export class Restty {
     return this.applyInterceptors(this.outputInterceptors, "output", { paneId, text, source });
   }
 
+  private runLifecycleHooks(payload: ResttyLifecycleHookPayload): void {
+    this.runHooks(this.lifecycleHooks, "lifecycle", payload);
+  }
+
+  private runRenderHooks(payload: ResttyRenderHookPayload): void {
+    this.runHooks(this.renderHooks, "render", payload);
+  }
+
   private applyInterceptors<TPayload extends { text: string }>(
     bucket: Array<ResttyRegisteredInterceptor<(payload: TPayload) => string | null | void>>,
     kind: "input" | "output",
@@ -841,6 +1192,21 @@ export class Restty {
       }
     }
     return currentText;
+  }
+
+  private runHooks<TPayload>(
+    bucket: Array<ResttyRegisteredInterceptor<(payload: TPayload) => void>>,
+    kind: "lifecycle" | "render",
+    payload: TPayload,
+  ): void {
+    for (let i = 0; i < bucket.length; i += 1) {
+      const entry = bucket[i];
+      try {
+        entry.interceptor(payload);
+      } catch (error) {
+        console.error(`[restty plugin] ${kind} hook error (${entry.pluginId}):`, error);
+      }
+    }
   }
 
   private normalizePluginMetadata(plugin: ResttyPlugin, pluginId: string): ResttyPlugin {
@@ -904,6 +1270,40 @@ export class Restty {
     }
   }
 
+  private lookupPluginRegistryEntry(
+    registry: ResttyPluginRegistry,
+    pluginId: string,
+  ): ResttyPluginRegistryEntry | null {
+    if (registry instanceof Map) {
+      return registry.get(pluginId) ?? null;
+    }
+    if (Object.prototype.hasOwnProperty.call(registry, pluginId)) {
+      return registry[pluginId];
+    }
+    return null;
+  }
+
+  private async resolvePluginRegistryEntry(
+    entry: ResttyPluginRegistryEntry,
+  ): Promise<ResttyPlugin> {
+    if (typeof entry === "function") {
+      return await entry();
+    }
+    return entry;
+  }
+
+  private setPluginLoadError(pluginId: string, message: string): void {
+    this.pluginDiagnostics.set(pluginId, {
+      id: pluginId,
+      version: null,
+      apiVersion: null,
+      requires: null,
+      active: false,
+      activatedAt: null,
+      lastError: message,
+    });
+  }
+
   private updatePluginDiagnostic(
     pluginId: string,
     patch: Partial<Pick<ResttyPluginDiagnostic, "active" | "activatedAt" | "lastError">>,
@@ -932,6 +1332,12 @@ export class Restty {
       ? runtime.disposers.filter((entry) => entry.active && entry.kind === "output-interceptor")
           .length
       : 0;
+    const lifecycleHooks = runtime
+      ? runtime.disposers.filter((entry) => entry.active && entry.kind === "lifecycle-hook").length
+      : 0;
+    const renderHooks = runtime
+      ? runtime.disposers.filter((entry) => entry.active && entry.kind === "render-hook").length
+      : 0;
 
     return {
       id: pluginId,
@@ -946,6 +1352,8 @@ export class Restty {
       listeners,
       inputInterceptors,
       outputInterceptors,
+      lifecycleHooks,
+      renderHooks,
     };
   }
 

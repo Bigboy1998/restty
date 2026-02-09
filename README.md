@@ -182,8 +182,8 @@ Active-pane convenience:
 
 Plugin host:
 
-- `use(plugin)` / `unuse(pluginId)` / `plugins()` / `pluginInfo(pluginId?)`
-- plugin context supports `on(...)`, `addInputInterceptor(...)`, `addOutputInterceptor(...)`
+- `use(plugin, options?)` / `loadPlugins(manifest, registry)` / `unuse(pluginId)` / `plugins()` / `pluginInfo(pluginId?)`
+- plugin context supports `on(...)`, `addInputInterceptor(...)`, `addOutputInterceptor(...)`, `addLifecycleHook(...)`, `addRenderHook(...)`
 
 ## Advanced / Internal Modules
 

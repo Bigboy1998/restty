@@ -25,11 +25,19 @@ export const examplePlugin: ResttyPlugin = {
 
     const inputFilter = ctx.addInputInterceptor(({ text }) => text);
     const outputFilter = ctx.addOutputInterceptor(({ text }) => text);
+    const lifecycle = ctx.addLifecycleHook(({ phase, action }) => {
+      console.log(phase, action);
+    });
+    const render = ctx.addRenderHook(({ phase, paneId }) => {
+      console.log(phase, paneId);
+    });
 
     return () => {
       paneCreated.dispose();
       inputFilter.dispose();
       outputFilter.dispose();
+      lifecycle.dispose();
+      render.dispose();
     };
   },
 };
@@ -46,10 +54,17 @@ If compatibility checks fail, `restty.use(plugin)` throws and the failure appear
 
 ## Runtime API
 
-- `await restty.use(plugin)`: activate plugin once.
+- `await restty.use(plugin, options?)`: activate plugin once (plugin receives `ctx.options` and second `activate` arg).
+- `await restty.loadPlugins(manifest, registry)`: load declarative manifest entries from a plugin registry.
 - `restty.unuse(pluginId)`: deactivate plugin and run cleanup.
 - `restty.plugins()`: active plugin IDs.
-- `restty.pluginInfo(pluginId?)`: diagnostics snapshot (active state, errors, listener/interceptor counts).
+- `restty.pluginInfo(pluginId?)`: diagnostics snapshot (active state, errors, listener/interceptor/hook counts).
+
+Manifest/registry:
+
+- Manifest entry: `{ id, enabled?, options? }`.
+- Registry entry: plugin object or async loader function.
+- `loadPlugins` returns per-entry status: `loaded | skipped | missing | failed`.
 
 ## Interceptors
 
@@ -64,6 +79,12 @@ Ordering:
 
 - Lower `priority` runs first.
 - Same `priority` uses registration order.
+
+## Lifecycle and render hooks
+
+- `addLifecycleHook`: observe high-level API lifecycle around pane operations (`create-initial-pane`, `split-*`, `close-pane`, `set-active-pane`, `mark-pane-focused`, `connect-pty`, `disconnect-pty`, `resize`, `focus`, `blur`).
+- `addRenderHook`: observe render pipeline phases around PTY output (`before`/`after`) with `dropped` state.
+- Hooks are observation points; use interceptors when you need to mutate/drop text.
 
 ## Safety expectations
 

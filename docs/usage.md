@@ -219,11 +219,19 @@ const logPlugin: ResttyPlugin = {
     });
     const outgoing = ctx.addInputInterceptor(({ text }) => text.replace(/\t/g, "  "));
     const incoming = ctx.addOutputInterceptor(({ text }) => text);
+    const lifecycle = ctx.addLifecycleHook(({ phase, action }) => {
+      console.log("lifecycle", phase, action);
+    });
+    const render = ctx.addRenderHook(({ phase, paneId, dropped }) => {
+      console.log("render", phase, paneId, dropped);
+    });
     return () => {
       created.dispose();
       active.dispose();
       outgoing.dispose();
       incoming.dispose();
+      lifecycle.dispose();
+      render.dispose();
     };
   },
 };
@@ -232,6 +240,14 @@ await restty.use(logPlugin);
 console.log(restty.plugins()); // ["example/log-pane-events"]
 console.log(restty.pluginInfo("example/log-pane-events"));
 restty.unuse("example/log-pane-events");
+
+// Optional manifest + registry loading
+await restty.loadPlugins(
+  [{ id: "example/log-pane-events", options: { level: "info" } }],
+  {
+    "example/log-pane-events": () => logPlugin,
+  },
+);
 ```
 
 ## Local playground workflow
