@@ -1,5 +1,16 @@
 # restty
 
+[![Version](https://img.shields.io/npm/v/restty?style=flat-square)](https://www.npmjs.com/package/restty)
+[![Gzip Size](https://img.shields.io/bundlephobia/minzip/restty?style=flat-square)](https://bundlephobia.com/package/restty)
+[![CI](https://img.shields.io/github/actions/workflow/status/wiedymi/restty/ci.yml?branch=main&style=flat-square)](https://github.com/wiedymi/restty/actions/workflows/ci.yml)
+[![Publish](https://img.shields.io/github/actions/workflow/status/wiedymi/restty/publish.yml?style=flat-square&label=publish)](https://github.com/wiedymi/restty/actions/workflows/publish.yml)
+[![Demo](https://img.shields.io/badge/demo-restty.pages.dev-0ea5e9?style=flat-square)](https://restty.pages.dev/)
+[![GitHub](https://img.shields.io/badge/-GitHub-181717?style=flat-square&logo=github&logoColor=white)](https://github.com/wiedymi)
+[![Twitter](https://img.shields.io/badge/-Twitter-1DA1F2?style=flat-square&logo=twitter&logoColor=white)](https://x.com/wiedymi)
+[![Email](https://img.shields.io/badge/-Email-EA4335?style=flat-square&logo=gmail&logoColor=white)](mailto:contact@wiedymi.com)
+[![Discord](https://img.shields.io/badge/-Discord-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/zemMZtrkSb)
+[![Support me](https://img.shields.io/badge/-Support%20me-ff69b4?style=flat-square&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/vivy-company)
+
 Powerful, lightweight browser terminal. Batteries included.
 
 Live demo: `https://restty.pages.dev/`
