@@ -46,6 +46,9 @@ test("default keymap emits terminal-standard backspace/delete", () => {
 test("beforeinput delete events map to terminal-standard sequences", () => {
   expect(encodeBeforeInput(beforeInputEvent({ inputType: "deleteContentBackward" }))).toBe("\x7f");
   expect(encodeBeforeInput(beforeInputEvent({ inputType: "deleteContentForward" }))).toBe("\x1b[3~");
+  expect(encodeBeforeInput(beforeInputEvent({ inputType: "deleteWordBackward" }))).toBe("\x7f");
+  expect(encodeBeforeInput(beforeInputEvent({ inputType: "deleteWordForward" }))).toBe("\x1b[3~");
+  expect(encodeBeforeInput(beforeInputEvent({ inputType: "insertParagraph" }))).toBe("\r");
 });
 
 test("mapKeyForPty normalizes legacy delete/backspace payloads", () => {
@@ -58,6 +61,9 @@ test("mapKeyForPty normalizes legacy delete/backspace payloads", () => {
 test("mapKeyForPty normalizes kitty keyboard payloads for erase/enter", () => {
   expect(mapKeyForPty("\x1b[127u")).toBe("\x7f");
   expect(mapKeyForPty("\x1b[127;1u")).toBe("\x7f");
+  expect(mapKeyForPty("\x1b[127;1:1u")).toBe("\x7f");
   expect(mapKeyForPty("\x1b[13u")).toBe("\r");
   expect(mapKeyForPty("\x1b[3;2~")).toBe("\x1b[3~");
+  expect(mapKeyForPty("\x1b[127;1:3u")).toBe("\x1b[127;1:3u");
+  expect(mapKeyForPty("\x1b[3;1:3~")).toBe("\x1b[3;1:3~");
 });

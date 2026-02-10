@@ -34,6 +34,21 @@ export function bindImeEvents(options: BindImeEventsOptions) {
   } = bindOptions;
 
   let suppressNextInput = false;
+  let lastNormalizedKeydownSeq = "";
+  let lastNormalizedKeydownSeqSource = "";
+
+  const getNormalizedLastKeydownSeq = () => {
+    const source = getLastKeydownSeq();
+    if (!source) {
+      lastNormalizedKeydownSeqSource = "";
+      lastNormalizedKeydownSeq = "";
+      return "";
+    }
+    if (source === lastNormalizedKeydownSeqSource) return lastNormalizedKeydownSeq;
+    lastNormalizedKeydownSeqSource = source;
+    lastNormalizedKeydownSeq = inputHandler.mapKeyForPty(source);
+    return lastNormalizedKeydownSeq;
+  };
 
   const onCompositionStart = (event: CompositionEvent) => {
     imeState.composing = true;
@@ -80,10 +95,12 @@ export function bindImeEvents(options: BindImeEventsOptions) {
     const text = inputHandler.encodeBeforeInput(event);
 
     if (text) {
+      const normalizedText = inputHandler.mapKeyForPty(text);
+      const normalizedLastKeydownSeq = getNormalizedLastKeydownSeq();
       const now = performance.now();
       if (
-        getLastKeydownSeq() &&
-        text === getLastKeydownSeq() &&
+        normalizedLastKeydownSeq &&
+        normalizedText === normalizedLastKeydownSeq &&
         now - getLastKeydownSeqAt() <= keydownBeforeinputDedupeMs
       ) {
         event.preventDefault();
