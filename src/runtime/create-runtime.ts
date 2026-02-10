@@ -90,6 +90,7 @@ import {
 } from "./render-stage-runtime";
 import { createPtyOutputBufferController } from "./pty-output-buffer";
 import {
+  fitTextTailToWidth,
   openLink,
   sourceLabelFromUrl,
   sourceBufferFromView,
@@ -448,8 +449,8 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     style.position = "fixed";
     style.left = "0";
     style.top = "0";
-    style.width = "0";
-    style.height = "0";
+    style.width = "1em";
+    style.height = "1em";
     style.padding = "0";
     style.margin = "0";
     style.border = "0";
@@ -4655,55 +4656,79 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
       const preeditText = imeState.preedit;
       const preeditFontIndex = pickFontIndexForText(preeditText, 1);
       const preeditEntry = fontState.fonts[preeditFontIndex] ?? fontState.fonts[0];
-      const shaped = shapeClusterWithFont(preeditEntry, preeditText);
-      noteColorGlyphText(preeditEntry, preeditText, shaped);
-      const glyphSet = getGlyphSet(preeditFontIndex);
-      for (const glyph of shaped.glyphs) glyphSet.add(glyph.glyphId);
-      const preeditRow = cursorCell?.row ?? cursorImeAnchor?.row ?? cursor.row;
-      const preeditCol = cursorCell?.col ?? cursorImeAnchor?.col ?? cursor.col;
-      const baseY = preeditRow * cellH + yPad + baselineOffset;
-      const x = preeditCol * cellW;
       const preeditScale = scaleByFont[preeditFontIndex] ?? primaryScale;
-      const advancePx = shaped.advance * preeditScale;
-      const widthPx = Math.max(cellW, advancePx);
-      const rowY = preeditRow * cellH;
-      pushRect(bgData, x, rowY, widthPx, cellH, PREEDIT_BG);
-      const thickness = underlineThicknessPx;
-      const underlineBaseY = clamp(
-        baseY + underlineOffsetPx,
-        rowY + 1,
-        rowY + cellH - thickness - 1,
-      );
-      pushRect(underlineData, x, underlineBaseY, widthPx, thickness, PREEDIT_UL);
-      const selStart = imeState.selectionStart || 0;
-      const selEnd = imeState.selectionEnd || 0;
-      if (selEnd > selStart) {
-        const leftWidth =
-          shapeClusterWithFont(preeditEntry, preeditText.slice(0, selStart)).advance * preeditScale;
-        const selWidth =
-          shapeClusterWithFont(preeditEntry, preeditText.slice(selStart, selEnd)).advance *
-          preeditScale;
-        pushRect(bgData, x + leftWidth, rowY, selWidth, cellH, PREEDIT_ACTIVE_BG);
-        pushRect(underlineData, x + leftWidth, underlineBaseY, selWidth, thickness, PREEDIT_UL);
-      } else {
-        const caretWidth = Math.max(1, Math.floor(cellW * 0.1));
-        const caretX =
-          x +
-          shapeClusterWithFont(preeditEntry, preeditText.slice(0, selStart)).advance * preeditScale;
-        pushRect(cursorData, caretX, rowY + 2, caretWidth, cellH - 4, PREEDIT_CARET);
-      }
-      getGlyphQueue(preeditFontIndex).push({
-        x,
-        baseY,
-        xPad: 0,
-        fg: PREEDIT_FG,
-        bg: PREEDIT_BG,
-        shaped,
-        fontIndex: preeditFontIndex,
-        scale: preeditScale,
-        cellWidth: cellW,
-        symbolLike: false,
+      const preeditRow = cursorImeAnchor?.row ?? cursorCell?.row ?? cursor.row;
+      const preeditCol = cursorImeAnchor?.col ?? cursorCell?.col ?? cursor.col;
+      const maxPreeditWidthPx = Math.max(cellW, (cols - preeditCol) * cellW);
+      const fittedPreedit = fitTextTailToWidth(preeditText, maxPreeditWidthPx, (value) => {
+        if (!value) return 0;
+        return shapeClusterWithFont(preeditEntry, value).advance * preeditScale;
       });
+      const visiblePreeditText = fittedPreedit.text;
+      if (!visiblePreeditText) {
+        // nothing visible in viewport
+      } else {
+        const shaped = shapeClusterWithFont(preeditEntry, visiblePreeditText);
+        noteColorGlyphText(preeditEntry, visiblePreeditText, shaped);
+        const glyphSet = getGlyphSet(preeditFontIndex);
+        for (const glyph of shaped.glyphs) glyphSet.add(glyph.glyphId);
+        const baseY = preeditRow * cellH + yPad + baselineOffset;
+        const x = preeditCol * cellW;
+        const advancePx = shaped.advance * preeditScale;
+        const widthPx = Math.max(
+          cellW,
+          Math.min(maxPreeditWidthPx, Math.max(fittedPreedit.widthPx, advancePx)),
+        );
+        const rowY = preeditRow * cellH;
+        pushRect(bgData, x, rowY, widthPx, cellH, PREEDIT_BG);
+        const thickness = underlineThicknessPx;
+        const underlineBaseY = clamp(
+          baseY + underlineOffsetPx,
+          rowY + 1,
+          rowY + cellH - thickness - 1,
+        );
+        pushRect(underlineData, x, underlineBaseY, widthPx, thickness, PREEDIT_UL);
+        const selectionOffset = fittedPreedit.offset;
+        const rawSelStart = imeState.selectionStart || 0;
+        const rawSelEnd = imeState.selectionEnd || 0;
+        const selStart = Math.max(
+          0,
+          Math.min(visiblePreeditText.length, rawSelStart - selectionOffset),
+        );
+        const selEnd = Math.max(
+          selStart,
+          Math.min(visiblePreeditText.length, rawSelEnd - selectionOffset),
+        );
+        if (selEnd > selStart) {
+          const leftWidth =
+            shapeClusterWithFont(preeditEntry, visiblePreeditText.slice(0, selStart)).advance *
+            preeditScale;
+          const selWidth =
+            shapeClusterWithFont(preeditEntry, visiblePreeditText.slice(selStart, selEnd)).advance *
+            preeditScale;
+          pushRect(bgData, x + leftWidth, rowY, selWidth, cellH, PREEDIT_ACTIVE_BG);
+          pushRect(underlineData, x + leftWidth, underlineBaseY, selWidth, thickness, PREEDIT_UL);
+        } else {
+          const caretWidth = Math.max(1, Math.floor(cellW * 0.1));
+          const caretX =
+            x +
+            shapeClusterWithFont(preeditEntry, visiblePreeditText.slice(0, selStart)).advance *
+              preeditScale;
+          pushRect(cursorData, caretX, rowY + 2, caretWidth, cellH - 4, PREEDIT_CARET);
+        }
+        getGlyphQueue(preeditFontIndex).push({
+          x,
+          baseY,
+          xPad: 0,
+          fg: PREEDIT_FG,
+          bg: PREEDIT_BG,
+          shaped,
+          fontIndex: preeditFontIndex,
+          scale: preeditScale,
+          cellWidth: widthPx,
+          symbolLike: false,
+        });
+      }
     }
 
     const resizeAge = performance.now() - resizeState.lastAt;
@@ -5800,55 +5825,79 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
       const preeditText = imeState.preedit;
       const preeditFontIndex = pickFontIndexForText(preeditText, 1);
       const preeditEntry = fontState.fonts[preeditFontIndex] ?? fontState.fonts[0];
-      const shaped = shapeClusterWithFont(preeditEntry, preeditText);
-      noteColorGlyphText(preeditEntry, preeditText, shaped);
-      const glyphSet = getGlyphSet(preeditFontIndex);
-      for (const glyph of shaped.glyphs) glyphSet.add(glyph.glyphId);
-      const preeditRow = cursorCell?.row ?? cursorImeAnchor?.row ?? cursor.row;
-      const preeditCol = cursorCell?.col ?? cursorImeAnchor?.col ?? cursor.col;
-      const baseY = preeditRow * cellH + yPad + baselineOffset;
-      const x = preeditCol * cellW;
       const preeditScale = scaleByFont[preeditFontIndex] ?? primaryScale;
-      const advancePx = shaped.advance * preeditScale;
-      const widthPx = Math.max(cellW, advancePx);
-      const rowY = preeditRow * cellH;
-      pushRect(bgData, x, rowY, widthPx, cellH, PREEDIT_BG);
-      const thickness = underlineThicknessPx;
-      const underlineBaseY = clamp(
-        baseY + underlineOffsetPx,
-        rowY + 1,
-        rowY + cellH - thickness - 1,
-      );
-      pushRect(underlineData, x, underlineBaseY, widthPx, thickness, PREEDIT_UL);
-      const selStart = imeState.selectionStart || 0;
-      const selEnd = imeState.selectionEnd || 0;
-      if (selEnd > selStart) {
-        const leftWidth =
-          shapeClusterWithFont(preeditEntry, preeditText.slice(0, selStart)).advance * preeditScale;
-        const selWidth =
-          shapeClusterWithFont(preeditEntry, preeditText.slice(selStart, selEnd)).advance *
-          preeditScale;
-        pushRect(bgData, x + leftWidth, rowY, selWidth, cellH, PREEDIT_ACTIVE_BG);
-        pushRect(underlineData, x + leftWidth, underlineBaseY, selWidth, thickness, PREEDIT_UL);
-      } else {
-        const caretWidth = Math.max(1, Math.floor(cellW * 0.1));
-        const caretX =
-          x +
-          shapeClusterWithFont(preeditEntry, preeditText.slice(0, selStart)).advance * preeditScale;
-        pushRect(cursorData, caretX, rowY + 2, caretWidth, cellH - 4, PREEDIT_CARET);
-      }
-      getGlyphQueue(preeditFontIndex).push({
-        x,
-        baseY,
-        xPad: 0,
-        fg: PREEDIT_FG,
-        bg: PREEDIT_BG,
-        shaped,
-        fontIndex: preeditFontIndex,
-        scale: preeditScale,
-        cellWidth: cellW,
-        symbolLike: false,
+      const preeditRow = cursorImeAnchor?.row ?? cursorCell?.row ?? cursor.row;
+      const preeditCol = cursorImeAnchor?.col ?? cursorCell?.col ?? cursor.col;
+      const maxPreeditWidthPx = Math.max(cellW, (cols - preeditCol) * cellW);
+      const fittedPreedit = fitTextTailToWidth(preeditText, maxPreeditWidthPx, (value) => {
+        if (!value) return 0;
+        return shapeClusterWithFont(preeditEntry, value).advance * preeditScale;
       });
+      const visiblePreeditText = fittedPreedit.text;
+      if (!visiblePreeditText) {
+        // nothing visible in viewport
+      } else {
+        const shaped = shapeClusterWithFont(preeditEntry, visiblePreeditText);
+        noteColorGlyphText(preeditEntry, visiblePreeditText, shaped);
+        const glyphSet = getGlyphSet(preeditFontIndex);
+        for (const glyph of shaped.glyphs) glyphSet.add(glyph.glyphId);
+        const baseY = preeditRow * cellH + yPad + baselineOffset;
+        const x = preeditCol * cellW;
+        const advancePx = shaped.advance * preeditScale;
+        const widthPx = Math.max(
+          cellW,
+          Math.min(maxPreeditWidthPx, Math.max(fittedPreedit.widthPx, advancePx)),
+        );
+        const rowY = preeditRow * cellH;
+        pushRect(bgData, x, rowY, widthPx, cellH, PREEDIT_BG);
+        const thickness = underlineThicknessPx;
+        const underlineBaseY = clamp(
+          baseY + underlineOffsetPx,
+          rowY + 1,
+          rowY + cellH - thickness - 1,
+        );
+        pushRect(underlineData, x, underlineBaseY, widthPx, thickness, PREEDIT_UL);
+        const selectionOffset = fittedPreedit.offset;
+        const rawSelStart = imeState.selectionStart || 0;
+        const rawSelEnd = imeState.selectionEnd || 0;
+        const selStart = Math.max(
+          0,
+          Math.min(visiblePreeditText.length, rawSelStart - selectionOffset),
+        );
+        const selEnd = Math.max(
+          selStart,
+          Math.min(visiblePreeditText.length, rawSelEnd - selectionOffset),
+        );
+        if (selEnd > selStart) {
+          const leftWidth =
+            shapeClusterWithFont(preeditEntry, visiblePreeditText.slice(0, selStart)).advance *
+            preeditScale;
+          const selWidth =
+            shapeClusterWithFont(preeditEntry, visiblePreeditText.slice(selStart, selEnd)).advance *
+            preeditScale;
+          pushRect(bgData, x + leftWidth, rowY, selWidth, cellH, PREEDIT_ACTIVE_BG);
+          pushRect(underlineData, x + leftWidth, underlineBaseY, selWidth, thickness, PREEDIT_UL);
+        } else {
+          const caretWidth = Math.max(1, Math.floor(cellW * 0.1));
+          const caretX =
+            x +
+            shapeClusterWithFont(preeditEntry, visiblePreeditText.slice(0, selStart)).advance *
+              preeditScale;
+          pushRect(cursorData, caretX, rowY + 2, caretWidth, cellH - 4, PREEDIT_CARET);
+        }
+        getGlyphQueue(preeditFontIndex).push({
+          x,
+          baseY,
+          xPad: 0,
+          fg: PREEDIT_FG,
+          bg: PREEDIT_BG,
+          shaped,
+          fontIndex: preeditFontIndex,
+          scale: preeditScale,
+          cellWidth: widthPx,
+          symbolLike: false,
+        });
+      }
     }
 
     const resizeAge = performance.now() - resizeState.lastAt;

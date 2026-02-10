@@ -117,8 +117,8 @@ function createImeInput(className: string): HTMLTextAreaElement {
   imeInput.style.position = "fixed";
   imeInput.style.left = "0";
   imeInput.style.top = "0";
-  imeInput.style.width = "0";
-  imeInput.style.height = "0";
+  imeInput.style.width = "1em";
+  imeInput.style.height = "1em";
   imeInput.style.padding = "0";
   imeInput.style.margin = "0";
   imeInput.style.border = "0";

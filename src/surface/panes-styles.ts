@@ -103,8 +103,8 @@ body.is-resizing-split {
   position: fixed;
   left: 0;
   top: 0;
-  width: 0;
-  height: 0;
+  width: 1em;
+  height: 1em;
   padding: 0;
   margin: 0;
   border: 0;

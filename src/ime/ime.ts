@@ -87,7 +87,9 @@ export function updateImePosition(
   const scale = dpr || 1;
   const x = canvasRect.left + cursor.col * (cellW / scale);
   const y = canvasRect.top + cursor.row * (cellH / scale);
-  imeInput.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  imeInput.style.transform = "none";
+  imeInput.style.left = `${Math.round(x)}px`;
+  imeInput.style.top = `${Math.round(y)}px`;
 }
 
 /** Resolve a visible IME anchor from cursor coordinates, clamped to current viewport bounds. */
@@ -120,15 +122,15 @@ export function resolveImeAnchor(
  */
 export function syncImeInputTypography(
   imeInput: HTMLInputElement | HTMLTextAreaElement | null,
-  fontSizePx: number,
+  fontSizePt: number,
   fontFamily = DEFAULT_IME_FONT_FAMILY,
 ): void {
   if (!imeInput) return;
-  const size = Number.isFinite(fontSizePx)
-    ? Math.max(10, Math.min(64, Math.round(fontSizePx)))
+  const size = Number.isFinite(fontSizePt)
+    ? Math.max(10, Math.min(64, Math.round(fontSizePt)))
     : 18;
-  imeInput.style.fontSize = `${size}px`;
-  imeInput.style.lineHeight = `${size}px`;
+  imeInput.style.fontSize = `${size}pt`;
+  imeInput.style.lineHeight = `${size}pt`;
   imeInput.style.fontFamily = fontFamily;
   imeInput.style.fontWeight = "400";
   imeInput.style.letterSpacing = "0";
