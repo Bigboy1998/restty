@@ -181,7 +181,11 @@ export function bindPointerEvents(options: BindPointerEventsOptions) {
         return;
       }
       const point = pointerToCanvasPx(event);
-      const targetOffset = scrollbarOffsetForPointerY(layout, point.y, scrollbarDragState.thumbGrabRatio);
+      const targetOffset = scrollbarOffsetForPointerY(
+        layout,
+        point.y,
+        scrollbarDragState.thumbGrabRatio,
+      );
       setViewportScrollOffset(targetOffset);
       event.preventDefault();
       return;
@@ -197,7 +201,10 @@ export function bindPointerEvents(options: BindPointerEventsOptions) {
           tryActivatePendingTouchSelection(event.pointerId);
         }
         if (touchSelectionState.pendingPointerId === event.pointerId) {
-          if (touchSelectionMode === "long-press" && touchSelectionState.panPointerId === event.pointerId) {
+          if (
+            touchSelectionMode === "long-press" &&
+            touchSelectionState.panPointerId === event.pointerId
+          ) {
             const deltaPx = touchSelectionState.panLastY - event.clientY;
             touchSelectionState.panLastY = event.clientY;
             scrollViewportByLines((deltaPx / Math.max(1, getGridState().cellH)) * 1.5);
@@ -215,7 +222,10 @@ export function bindPointerEvents(options: BindPointerEventsOptions) {
         markNeedsRender();
         return;
       }
-      if (touchSelectionMode === "long-press" && touchSelectionState.panPointerId === event.pointerId) {
+      if (
+        touchSelectionMode === "long-press" &&
+        touchSelectionState.panPointerId === event.pointerId
+      ) {
         const deltaPx = touchSelectionState.panLastY - event.clientY;
         touchSelectionState.panLastY = event.clientY;
         scrollViewportByLines((deltaPx / Math.max(1, getGridState().cellH)) * 1.5);
@@ -225,7 +235,10 @@ export function bindPointerEvents(options: BindPointerEventsOptions) {
     }
 
     const cell = normalizeSelectionCell(positionToCell(event));
-    if (desktopSelectionState.pendingPointerId === event.pointerId && desktopSelectionState.pendingCell) {
+    if (
+      desktopSelectionState.pendingPointerId === event.pointerId &&
+      desktopSelectionState.pendingCell
+    ) {
       const anchor = desktopSelectionState.pendingCell;
       if (anchor.row !== cell.row || anchor.col !== cell.col) {
         beginSelectionDrag(anchor, event.pointerId);
@@ -248,7 +261,10 @@ export function bindPointerEvents(options: BindPointerEventsOptions) {
       return;
     }
 
-    if (shouldRoutePointerToAppMouse(event.shiftKey) && inputHandler.sendMouseEvent("move", event)) {
+    if (
+      shouldRoutePointerToAppMouse(event.shiftKey) &&
+      inputHandler.sendMouseEvent("move", event)
+    ) {
       event.preventDefault();
       return;
     }

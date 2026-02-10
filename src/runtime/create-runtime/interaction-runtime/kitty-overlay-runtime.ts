@@ -36,7 +36,9 @@ export type KittyOverlayRuntime = {
   detachKittyOverlayCanvas: () => void;
 };
 
-export function createKittyOverlayRuntime(options: CreateKittyOverlayRuntimeOptions): KittyOverlayRuntime {
+export function createKittyOverlayRuntime(
+  options: CreateKittyOverlayRuntimeOptions,
+): KittyOverlayRuntime {
   const { getCanvas, kittyOverlayDebugEnabled, kittyImageCache } = options;
 
   let kittyOverlayCanvas: HTMLCanvasElement | null = null;

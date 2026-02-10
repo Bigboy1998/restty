@@ -5,7 +5,10 @@ import type { WebGLTickContext, WebGLTickDeps } from "./render-tick-webgl.types"
 
 export type { WebGLTickContext } from "./render-tick-webgl.types";
 
-export function buildWebGLTickContext(deps: WebGLTickDeps, state: WebGLState): WebGLTickContext | null {
+export function buildWebGLTickContext(
+  deps: WebGLTickDeps,
+  state: WebGLState,
+): WebGLTickContext | null {
   const {
     isShaderStagesDirty,
     rebuildWebGLShaderStages,
@@ -105,7 +108,9 @@ export function buildWebGLTickContext(deps: WebGLTickDeps, state: WebGLState): W
   }
 
   const mergedEmojiSkip = new Uint8Array(codepoints.length);
-  const readCellCluster = (cellIndex: number): { cp: number; text: string; span: number } | null => {
+  const readCellCluster = (
+    cellIndex: number,
+  ): { cp: number; text: string; span: number } | null => {
     const flag = wide ? (wide[cellIndex] ?? 0) : 0;
     if (flag === 2 || flag === 3) return null;
     const cp = codepoints[cellIndex] ?? 0;
@@ -256,7 +261,12 @@ export function buildWebGLTickContext(deps: WebGLTickDeps, state: WebGLState): W
     if (!neededGlyphMetaByFont.has(fontIndex)) neededGlyphMetaByFont.set(fontIndex, new Map());
     return neededGlyphMetaByFont.get(fontIndex)!;
   };
-  const noteGlyphMeta = (fontIndex: number, glyphId: number, cp: number, constraintWidth: number) => {
+  const noteGlyphMeta = (
+    fontIndex: number,
+    glyphId: number,
+    cp: number,
+    constraintWidth: number,
+  ) => {
     if (!glyphId || !cp) return;
     const meta = getGlyphMeta(fontIndex);
     const prev = meta.get(glyphId);

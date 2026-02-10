@@ -36,7 +36,12 @@ export type ScrollbarRuntime = {
   setViewportScrollOffset: (nextOffset: number) => void;
   pointerToCanvasPx: (event: PointerEvent) => { x: number; y: number };
   getOverlayScrollbarLayout: () => OverlayScrollbarLayout | null;
-  appendOverlayScrollbar: (overlayData: number[], total: number, offset: number, len: number) => void;
+  appendOverlayScrollbar: (
+    overlayData: number[],
+    total: number,
+    offset: number,
+    len: number,
+  ) => void;
 };
 
 export function createScrollbarRuntime(options: CreateScrollbarRuntimeOptions): ScrollbarRuntime {
@@ -150,7 +155,9 @@ export function createScrollbarRuntime(options: CreateScrollbarRuntimeOptions): 
     const offset = wasmExports.restty_scrollbar_offset
       ? wasmExports.restty_scrollbar_offset(wasmHandle)
       : 0;
-    const len = wasmExports.restty_scrollbar_len ? wasmExports.restty_scrollbar_len(wasmHandle) : rows;
+    const len = wasmExports.restty_scrollbar_len
+      ? wasmExports.restty_scrollbar_len(wasmHandle)
+      : rows;
     const canvas = getCanvas();
     return computeOverlayScrollbarLayout(
       total,
@@ -162,7 +169,12 @@ export function createScrollbarRuntime(options: CreateScrollbarRuntimeOptions): 
     );
   };
 
-  const appendOverlayScrollbar = (overlayData: number[], total: number, offset: number, len: number) => {
+  const appendOverlayScrollbar = (
+    overlayData: number[],
+    total: number,
+    offset: number,
+    len: number,
+  ) => {
     if (!showOverlayScrollbar) return;
     const canvas = getCanvas();
     const layout = computeOverlayScrollbarLayout(

@@ -7,10 +7,7 @@ import {
   type FontEntry,
   type FontManagerState,
 } from "../../fonts";
-import {
-  isCoverageIgnorableCodepoint,
-  resolvePresentationPreference,
-} from "../codepoint-utils";
+import { isCoverageIgnorableCodepoint, resolvePresentationPreference } from "../codepoint-utils";
 import type {
   GlyphBufferToShapedGlyphsFn,
   ShapeFn,
@@ -105,10 +102,7 @@ export function createFontRuntimeTextHelpers(options: CreateFontRuntimeTextHelpe
             (entry) => hasItalicHint(entry),
           ]
         : stylePreference === "bold"
-          ? [
-              (entry) => hasBoldHint(entry) && !hasItalicHint(entry),
-              (entry) => hasBoldHint(entry),
-            ]
+          ? [(entry) => hasBoldHint(entry) && !hasItalicHint(entry), (entry) => hasBoldHint(entry)]
           : stylePreference === "italic"
             ? [
                 (entry) => hasItalicHint(entry) && !hasBoldHint(entry),

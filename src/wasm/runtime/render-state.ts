@@ -1,10 +1,5 @@
 import { readRenderStatePtrs, unpackCursor } from "./abi";
-import type {
-  RenderState,
-  RenderViewCache,
-  ResttyWasmExports,
-  WasmAbi,
-} from "./types";
+import type { RenderState, RenderViewCache, ResttyWasmExports, WasmAbi } from "./types";
 import { getCachedView } from "./view-cache";
 
 export function readRenderState(
@@ -22,7 +17,13 @@ export function readRenderState(
 
   const cellCount = rows * cols;
   const buffer = memory.buffer;
-  const codepoints = getCachedView(cache.codepoints, buffer, info.codepointsPtr, cellCount, Uint32Array);
+  const codepoints = getCachedView(
+    cache.codepoints,
+    buffer,
+    info.codepointsPtr,
+    cellCount,
+    Uint32Array,
+  );
   const contentTags = getCachedView(
     cache.contentTags,
     buffer,
@@ -49,12 +50,30 @@ export function readRenderState(
     linkCount && exports.restty_link_offsets_ptr ? exports.restty_link_offsets_ptr(handle) : 0;
   const linkLengthsPtr =
     linkCount && exports.restty_link_lengths_ptr ? exports.restty_link_lengths_ptr(handle) : 0;
-  const linkOffsets = getCachedView(cache.linkOffsets, buffer, linkOffsetsPtr, linkCount, Uint32Array);
-  const linkLengths = getCachedView(cache.linkLengths, buffer, linkLengthsPtr, linkCount, Uint32Array);
+  const linkOffsets = getCachedView(
+    cache.linkOffsets,
+    buffer,
+    linkOffsetsPtr,
+    linkCount,
+    Uint32Array,
+  );
+  const linkLengths = getCachedView(
+    cache.linkLengths,
+    buffer,
+    linkLengthsPtr,
+    linkCount,
+    Uint32Array,
+  );
   const linkBufferLen = exports.restty_link_buffer_len ? exports.restty_link_buffer_len(handle) : 0;
   const linkBufferPtr =
     linkBufferLen && exports.restty_link_buffer_ptr ? exports.restty_link_buffer_ptr(handle) : 0;
-  const linkBuffer = getCachedView(cache.linkBuffer, buffer, linkBufferPtr, linkBufferLen, Uint8Array);
+  const linkBuffer = getCachedView(
+    cache.linkBuffer,
+    buffer,
+    linkBufferPtr,
+    linkBufferLen,
+    Uint8Array,
+  );
   const graphemeOffset = getCachedView(
     cache.graphemeOffset,
     buffer,
@@ -83,7 +102,13 @@ export function readRenderState(
     rows,
     Int16Array,
   );
-  const selectionEnd = getCachedView(cache.selectionEnd, buffer, info.selectionEndPtr, rows, Int16Array);
+  const selectionEnd = getCachedView(
+    cache.selectionEnd,
+    buffer,
+    info.selectionEndPtr,
+    rows,
+    Int16Array,
+  );
   const cursor = info.cursorPtr ? unpackCursor(buffer, info.cursorPtr) : null;
 
   return {

@@ -98,8 +98,14 @@ export function emitWebGPUQueuedGlyphs(params: EmitWebGPUQueuedGlyphsParams) {
           gw = Math.max(1, Math.round(gw));
           gh = Math.max(1, Math.round(gh));
         }
-        let x = item.x + item.xPad + (penX + glyph.xOffset) * itemScale + metrics.bearingX * bitmapScale;
-        if (fontIndex > 0 && item.shaped.glyphs.length === 1 && !symbolLike && maxWidth <= cellW * 1.05) {
+        let x =
+          item.x + item.xPad + (penX + glyph.xOffset) * itemScale + metrics.bearingX * bitmapScale;
+        if (
+          fontIndex > 0 &&
+          item.shaped.glyphs.length === 1 &&
+          !symbolLike &&
+          maxWidth <= cellW * 1.05
+        ) {
           x = item.x + (maxWidth - gw) * 0.5;
         }
         const minX = item.x;
@@ -107,7 +113,8 @@ export function emitWebGPUQueuedGlyphs(params: EmitWebGPUQueuedGlyphsParams) {
         if (x < minX) x = minX;
         if (x + gw > maxX) x = Math.max(minX, maxX - gw);
 
-        let y = item.baseY + baselineAdjust - metrics.bearingY * bitmapScale - glyph.yOffset * itemScale;
+        let y =
+          item.baseY + baselineAdjust - metrics.bearingY * bitmapScale - glyph.yOffset * itemScale;
         if (!glyphConstrained && symbolLike && item.cp) {
           const nerdConstraint = resolveSymbolConstraint(item.cp);
           const defaultConstraint = isAppleSymbolsFont(entry)
@@ -123,7 +130,9 @@ export function emitWebGPUQueuedGlyphs(params: EmitWebGPUQueuedGlyphsParams) {
             frame.nerdMetrics,
             constraintWidth,
           );
-          const tightened = nerdConstraint ? tightenNerdConstraintBox(adjusted, nerdConstraint) : adjusted;
+          const tightened = nerdConstraint
+            ? tightenNerdConstraintBox(adjusted, nerdConstraint)
+            : adjusted;
           x = item.x + tightened.x;
           y = rowY + tightened.y;
           gw = tightened.width;

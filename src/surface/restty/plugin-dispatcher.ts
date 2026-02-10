@@ -70,7 +70,11 @@ export class ResttyPluginDispatcher {
         listener: (payload: ResttyPluginEvents[E]) => void,
       ) => {
         return {
-          dispose: this.attachRuntimeDisposer(runtime, "event", this.onPluginEvent(event, listener)),
+          dispose: this.attachRuntimeDisposer(
+            runtime,
+            "event",
+            this.onPluginEvent(event, listener),
+          ),
         };
       },
       addInputInterceptor: (interceptor, options) => {

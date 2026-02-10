@@ -153,16 +153,8 @@ export function renderWebGLGlyphPipeline(ctx: WebGLTickContext) {
       gl.UNSIGNED_BYTE,
       new Uint8Array(rgba),
     );
-    gl.texParameteri(
-      gl.TEXTURE_2D,
-      gl.TEXTURE_MIN_FILTER,
-      preferNearest ? gl.NEAREST : gl.LINEAR,
-    );
-    gl.texParameteri(
-      gl.TEXTURE_2D,
-      gl.TEXTURE_MAG_FILTER,
-      preferNearest ? gl.NEAREST : gl.LINEAR,
-    );
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, preferNearest ? gl.NEAREST : gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, preferNearest ? gl.NEAREST : gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
@@ -177,7 +169,10 @@ export function renderWebGLGlyphPipeline(ctx: WebGLTickContext) {
     state.glyphAtlases.set(fontIndex, atlasState);
   }
 
-  const emitGlyphs = (queueByFont: Map<number, GlyphQueueItem[]>, targetMap: Map<number, number[]>) => {
+  const emitGlyphs = (
+    queueByFont: Map<number, GlyphQueueItem[]>,
+    targetMap: Map<number, number[]>,
+  ) => {
     for (const [fontIndex, queue] of queueByFont.entries()) {
       const entry = fontState.fonts[fontIndex];
       const atlasState = state.glyphAtlases?.get(fontIndex);
@@ -271,7 +266,10 @@ export function renderWebGLGlyphPipeline(ctx: WebGLTickContext) {
             const constraint =
               nerdConstraint ?? (colorGlyph ? DEFAULT_EMOJI_CONSTRAINT : defaultConstraint);
             const rowY = item.baseY - yPad - baselineOffset;
-            const constraintWidth = Math.max(1, item.constraintWidth ?? Math.round(maxWidth / cellW));
+            const constraintWidth = Math.max(
+              1,
+              item.constraintWidth ?? Math.round(maxWidth / cellW),
+            );
             const adjusted = constrainGlyphBox(
               {
                 x: x - item.x,

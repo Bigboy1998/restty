@@ -69,7 +69,11 @@ export function augmentWebGPUFrameWithOverlaysAndAtlas(params: AugmentWebGPUFram
       const rowY = preeditRow * cellH;
       pushRect(frame.bgData, x, rowY, widthPx, cellH, PREEDIT_BG);
       const thickness = underlineThicknessPx;
-      const underlineBaseY = clamp(baseY + underlineOffsetPx, rowY + 1, rowY + cellH - thickness - 1);
+      const underlineBaseY = clamp(
+        baseY + underlineOffsetPx,
+        rowY + 1,
+        rowY + cellH - thickness - 1,
+      );
       pushRect(frame.underlineData, x, underlineBaseY, widthPx, thickness, PREEDIT_UL);
       const selectionOffset = fittedPreedit.offset;
       const rawSelStart = imeState.selectionStart || 0;
@@ -90,7 +94,14 @@ export function augmentWebGPUFrameWithOverlaysAndAtlas(params: AugmentWebGPUFram
           shapeClusterWithFont(preeditEntry, visiblePreeditText.slice(selStart, selEnd)).advance *
           preeditScale;
         pushRect(frame.bgData, x + leftWidth, rowY, selWidth, cellH, PREEDIT_ACTIVE_BG);
-        pushRect(frame.underlineData, x + leftWidth, underlineBaseY, selWidth, thickness, PREEDIT_UL);
+        pushRect(
+          frame.underlineData,
+          x + leftWidth,
+          underlineBaseY,
+          selWidth,
+          thickness,
+          PREEDIT_UL,
+        );
       } else {
         const caretWidth = Math.max(1, Math.floor(cellW * 0.1));
         const caretX =

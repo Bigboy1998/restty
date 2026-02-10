@@ -89,4 +89,3 @@ export function createLifecycleThemeHandlers(deps: LifecycleThemeSizeDeps) {
 
   return { applyTheme, resetTheme };
 }
-

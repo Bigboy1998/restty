@@ -1,6 +1,9 @@
 import type { ResttyAppInputPayload } from "../types";
 
-type RuntimeInputHook = ((payload: ResttyAppInputPayload) => string | null | void) | null | undefined;
+type RuntimeInputHook =
+  | ((payload: ResttyAppInputPayload) => string | null | void)
+  | null
+  | undefined;
 
 export type CreateRuntimeInputHooksOptions = {
   beforeInputHook?: RuntimeInputHook;
@@ -12,7 +15,9 @@ export type RuntimeInputHooks = {
   runBeforeRenderOutputHook: (text: string, source: string) => string | null;
 };
 
-export function createRuntimeInputHooks(options: CreateRuntimeInputHooksOptions): RuntimeInputHooks {
+export function createRuntimeInputHooks(
+  options: CreateRuntimeInputHooksOptions,
+): RuntimeInputHooks {
   const { beforeInputHook, beforeRenderOutputHook } = options;
 
   function runHook(

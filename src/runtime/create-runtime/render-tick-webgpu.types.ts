@@ -1,10 +1,7 @@
 import type { FontEntry, FontManagerState } from "../../fonts";
 import type { NerdConstraint } from "../../fonts/nerd-constraints";
 import type { Color, WebGPUState } from "../../renderer";
-import type {
-  CompiledWebGPUShaderStage,
-  WebGPUStageTargets,
-} from "../create-app-types";
+import type { CompiledWebGPUShaderStage, WebGPUStageTargets } from "../create-app-types";
 import type { GlyphConstraintMeta } from "../atlas-builder";
 import type { KittyPlacement, RenderState, ResttyWasm, ResttyWasmExports } from "../../wasm";
 
@@ -124,10 +121,7 @@ export type SharedTickDeps = {
   ) => NerdMetrics;
   nerdIconScale: number;
   selectionState: { active: boolean; dragging: boolean };
-  selectionForRow: (
-    row: number,
-    cols: number,
-  ) => { start: number; end: number } | null;
+  selectionForRow: (row: number, cols: number) => { start: number; end: number } | null;
   pushRect: (
     target: number[],
     x: number,
@@ -184,13 +178,7 @@ export type SharedTickDeps = {
     cellH: number,
     color: Color,
   ) => void;
-  drawOverline: (
-    target: number[],
-    x: number,
-    rowY: number,
-    cellW: number,
-    color: Color,
-  ) => void;
+  drawOverline: (target: number[], x: number, rowY: number, cellW: number, color: Color) => void;
   KITTY_PLACEHOLDER_CP: number;
   isSpaceCp: (cp: number) => boolean;
   shouldMergeTrailingClusterCodepoint: (cp: number) => boolean;
@@ -235,11 +223,7 @@ export type SharedTickDeps = {
     fg: Color,
     target: number[],
   ) => boolean;
-  pickFontIndexForText: (
-    text: string,
-    expectedSpan?: number,
-    stylePreference?: string,
-  ) => number;
+  pickFontIndexForText: (text: string, expectedSpan?: number, stylePreference?: string) => number;
   stylePreferenceFromFlags: (bold: boolean, italic: boolean) => string;
   noteColorGlyphText: (
     entry: FontEntry,
@@ -287,25 +271,12 @@ export type SharedTickDeps = {
   decodePackedRGBA: (packed: number) => Color;
   cursorFallback: Color;
   scrollbarState: { lastTotal: number; lastOffset: number; lastLen: number };
-  appendOverlayScrollbar: (
-    target: number[],
-    total: number,
-    offset: number,
-    len: number,
-  ) => void;
+  appendOverlayScrollbar: (target: number[], total: number, offset: number, len: number) => void;
   webgpuUniforms: Float32Array;
-  ensureInstanceBuffer: (
-    state: WebGPUState,
-    kind: "rect" | "glyph",
-    minBytes: number,
-  ) => void;
+  ensureInstanceBuffer: (state: WebGPUState, kind: "rect" | "glyph", minBytes: number) => void;
   GLYPH_INSTANCE_FLOATS: number;
   wasm: ResttyWasm | null;
-  drawKittyOverlay: (
-    placements: KittyPlacement[],
-    cellW: number,
-    cellH: number,
-  ) => void;
+  drawKittyOverlay: (placements: KittyPlacement[], cellW: number, cellH: number) => void;
   isAppleSymbolsFont: (entry: FontEntry) => boolean;
   DEFAULT_APPLE_SYMBOLS_CONSTRAINT: NerdConstraint;
   DEFAULT_SYMBOL_CONSTRAINT: NerdConstraint;
@@ -377,11 +348,7 @@ export type RuntimeTickDeps = SharedTickDeps & {
     yPad: number;
   };
   canvas: HTMLCanvasElement;
-  updateImePosition: (
-    cursor: { row: number; col: number },
-    cellW: number,
-    cellH: number,
-  ) => void;
+  updateImePosition: (cursor: { row: number; col: number }, cellW: number, cellH: number) => void;
   lastRenderState: RenderState | null;
 };
 

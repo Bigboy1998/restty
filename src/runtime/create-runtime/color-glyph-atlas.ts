@@ -1,13 +1,5 @@
-import type {
-  FontAtlas,
-  FontAtlasBitmap,
-  FontAtlasGlyphMetrics,
-  FontEntry,
-} from "../../fonts";
-import {
-  createAtlasBitmap,
-  copyBitmapToAtlas,
-} from "../font-atlas-utils/bitmap-utils";
+import type { FontAtlas, FontAtlasBitmap, FontAtlasGlyphMetrics, FontEntry } from "../../fonts";
+import { createAtlasBitmap, copyBitmapToAtlas } from "../font-atlas-utils/bitmap-utils";
 import { packGlyphs } from "../font-atlas-utils/packing-utils";
 import { resolveFontScaleForAtlas } from "../font-atlas-utils/nerd-metrics-utils";
 import { atlasBitmapToRGBA as atlasBitmapToRGBAFromBitmap } from "./atlas-debug-utils";

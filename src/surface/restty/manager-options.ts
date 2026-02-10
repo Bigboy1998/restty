@@ -1,8 +1,5 @@
 import type { DesktopNotification } from "../../input";
-import type {
-  CreateResttyAppPaneManagerOptions,
-  ResttyManagedAppPane,
-} from "../pane-app-manager";
+import type { CreateResttyAppPaneManagerOptions, ResttyManagedAppPane } from "../pane-app-manager";
 import type { ResttyPluginEvents, ResttyRenderHookPayload } from "../restty-plugin-types";
 import type { ResttyFontSource } from "../../runtime/types";
 import type { ResttyPluginOps } from "./plugin-ops";
@@ -42,7 +39,10 @@ export function createMergedPaneAppOptions(
     const resolvedBeforeInput = resolved.beforeInput;
     const resolvedBeforeRenderOutput = resolved.beforeRenderOutput;
     const resolvedCallbacks = resolved.callbacks;
-    const paneBaseStages = deps.shaderOps.normalizePaneShaderStages(resolved.shaderStages, context.id);
+    const paneBaseStages = deps.shaderOps.normalizePaneShaderStages(
+      resolved.shaderStages,
+      context.id,
+    );
     deps.shaderOps.setPaneBaseShaderStages(context.id, paneBaseStages);
 
     const fontSources = deps.getFontSources();

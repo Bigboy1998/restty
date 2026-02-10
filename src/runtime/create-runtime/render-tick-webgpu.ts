@@ -143,18 +143,30 @@ export function tickWebGPU(deps: RuntimeTickDeps, state: WebGPUState) {
   }
   const cursorImeAnchor = resolveImeAnchor(cursorPos, cols, rows);
   if (dbgEl && wasmExports && wasmHandle) {
-    const cx = wasmExports.restty_debug_cursor_x ? wasmExports.restty_debug_cursor_x(wasmHandle) : 0;
-    const cy = wasmExports.restty_debug_cursor_y ? wasmExports.restty_debug_cursor_y(wasmHandle) : 0;
+    const cx = wasmExports.restty_debug_cursor_x
+      ? wasmExports.restty_debug_cursor_x(wasmHandle)
+      : 0;
+    const cy = wasmExports.restty_debug_cursor_y
+      ? wasmExports.restty_debug_cursor_y(wasmHandle)
+      : 0;
     const sl = wasmExports.restty_debug_scroll_left
       ? wasmExports.restty_debug_scroll_left(wasmHandle)
       : 0;
     const sr = wasmExports.restty_debug_scroll_right
       ? wasmExports.restty_debug_scroll_right(wasmHandle)
       : 0;
-    const tc = wasmExports.restty_debug_term_cols ? wasmExports.restty_debug_term_cols(wasmHandle) : 0;
-    const tr = wasmExports.restty_debug_term_rows ? wasmExports.restty_debug_term_rows(wasmHandle) : 0;
-    const pc = wasmExports.restty_debug_page_cols ? wasmExports.restty_debug_page_cols(wasmHandle) : 0;
-    const pr = wasmExports.restty_debug_page_rows ? wasmExports.restty_debug_page_rows(wasmHandle) : 0;
+    const tc = wasmExports.restty_debug_term_cols
+      ? wasmExports.restty_debug_term_cols(wasmHandle)
+      : 0;
+    const tr = wasmExports.restty_debug_term_rows
+      ? wasmExports.restty_debug_term_rows(wasmHandle)
+      : 0;
+    const pc = wasmExports.restty_debug_page_cols
+      ? wasmExports.restty_debug_page_cols(wasmHandle)
+      : 0;
+    const pr = wasmExports.restty_debug_page_rows
+      ? wasmExports.restty_debug_page_rows(wasmHandle)
+      : 0;
     const text = `${cx},${cy} | ${sl}-${sr} | t:${tc}x${tr} p:${pc}x${pr}`;
     reportDebugText(text);
   }

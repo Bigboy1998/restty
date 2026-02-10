@@ -22,7 +22,10 @@ export function createSetupDebugExpose(
     debugWindow.dumpGlyphRender = createDumpGlyphRender(options);
   };
 
-  function createDumpGlyphMetrics({ pickFontIndexForText, fontState }: CreateRuntimeDebugToolsOptions) {
+  function createDumpGlyphMetrics({
+    pickFontIndexForText,
+    fontState,
+  }: CreateRuntimeDebugToolsOptions) {
     return (cp: number) => {
       const text = String.fromCodePoint(cp);
       const fontIndex = pickFontIndexForText(text, 1);
@@ -72,9 +75,7 @@ export function createSetupDebugExpose(
     };
   }
 
-  function createDumpAtlasRegion({
-    getActiveState,
-  }: CreateRuntimeDebugToolsOptions) {
+  function createDumpAtlasRegion({ getActiveState }: CreateRuntimeDebugToolsOptions) {
     return async (fontIndex: number, x: number, y: number, width: number, height: number) => {
       const state = getActiveState();
       if (!state || !("device" in state)) {
@@ -88,13 +89,10 @@ export function createSetupDebugExpose(
         return null;
       }
 
-      const image = await readTextureToImageData(
-        state.device,
-        atlasState.texture,
-        width,
-        height,
-        { x, y },
-      );
+      const image = await readTextureToImageData(state.device, atlasState.texture, width, height, {
+        x,
+        y,
+      });
       const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;

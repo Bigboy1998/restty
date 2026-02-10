@@ -221,7 +221,10 @@ export function createResttyPaneManager<TPane extends ResttyPaneDefinition>(
     collapseSplitAncestors(parent);
 
     const fallback =
-      getActivePane() ?? findClosestPaneToRect(closingRect, panes.values()) ?? getPanes()[0] ?? null;
+      getActivePane() ??
+      findClosestPaneToRect(closingRect, panes.values()) ??
+      getPanes()[0] ??
+      null;
     if (fallback) {
       markPaneFocused(fallback.id, { focus: true });
     } else {

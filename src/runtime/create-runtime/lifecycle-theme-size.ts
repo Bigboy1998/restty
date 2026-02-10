@@ -33,4 +33,3 @@ export function createRuntimeLifecycleThemeSize(deps: LifecycleThemeSizeDeps) {
     getActiveTheme: deps.getActiveTheme,
   };
 }
-

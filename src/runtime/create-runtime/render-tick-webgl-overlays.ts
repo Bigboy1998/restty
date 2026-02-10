@@ -239,7 +239,9 @@ export function populateWebGLOverlays(ctx: WebGLTickContext) {
     const offset = wasmExports.restty_scrollbar_offset
       ? wasmExports.restty_scrollbar_offset(wasmHandle)
       : 0;
-    const len = wasmExports.restty_scrollbar_len ? wasmExports.restty_scrollbar_len(wasmHandle) : rows;
+    const len = wasmExports.restty_scrollbar_len
+      ? wasmExports.restty_scrollbar_len(wasmHandle)
+      : rows;
     if (
       total !== scrollbarState.lastTotal ||
       offset !== scrollbarState.lastOffset ||

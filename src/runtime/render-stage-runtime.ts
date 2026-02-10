@@ -171,14 +171,7 @@ export function compileShaderStagePipelineWebGPU(options: {
   const { device, format, stage, reportError } = options;
   const shaderSource = `${FULLSCREEN_STAGE_SHADER_WGSL_PREFIX}${stage.shader.wgsl ?? ""}${FULLSCREEN_STAGE_SHADER_WGSL_SUFFIX}`;
   const formatError = (
-    error:
-      | Error
-      | { message?: string }
-      | string
-      | number
-      | boolean
-      | null
-      | undefined,
+    error: Error | { message?: string } | string | number | boolean | null | undefined,
   ): string => {
     if (error instanceof Error) return error.message;
     return String(error);

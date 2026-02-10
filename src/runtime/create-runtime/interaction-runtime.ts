@@ -28,7 +28,9 @@ export type {
   RuntimeInteraction,
 } from "./interaction-runtime/types";
 
-export function createRuntimeInteraction(options: CreateRuntimeInteractionOptions): RuntimeInteraction {
+export function createRuntimeInteraction(
+  options: CreateRuntimeInteractionOptions,
+): RuntimeInteraction {
   const {
     attachCanvasEvents,
     touchSelectionMode,

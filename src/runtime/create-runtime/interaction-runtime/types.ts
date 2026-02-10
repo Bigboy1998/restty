@@ -62,9 +62,7 @@ export type BindCanvasEventsOptions = {
   inputHandler: InputHandler;
   sendKeyInput: (text: string) => void;
   sendPasteText: (text: string) => void;
-  sendPastePayloadFromDataTransfer: (
-    dataTransfer: DataTransfer | null | undefined,
-  ) => boolean;
+  sendPastePayloadFromDataTransfer: (dataTransfer: DataTransfer | null | undefined) => boolean;
   getLastKeydownSeq: () => string;
   getLastKeydownSeqAt: () => number;
   keydownBeforeinputDedupeMs: number;
@@ -109,7 +107,12 @@ export type RuntimeInteraction = {
     cellW: number,
     cellH: number,
   ) => void;
-  appendOverlayScrollbar: (overlayData: number[], total: number, offset: number, len: number) => void;
+  appendOverlayScrollbar: (
+    overlayData: number[],
+    total: number,
+    offset: number,
+    len: number,
+  ) => void;
   bindCanvasEvents: (bindOptions: BindCanvasEventsOptions) => void;
   detachKittyOverlayCanvas: () => void;
   clearKittyImageCache: () => void;

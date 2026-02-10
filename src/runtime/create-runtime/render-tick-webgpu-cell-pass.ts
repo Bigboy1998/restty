@@ -1,9 +1,6 @@
 import type { Color } from "../../renderer";
 import type { GlyphConstraintMeta } from "../atlas-builder";
-import type {
-  CollectWebGPUCellPassParams,
-  GlyphQueueItem,
-} from "./render-tick-webgpu.types";
+import type { CollectWebGPUCellPassParams, GlyphQueueItem } from "./render-tick-webgpu.types";
 
 export function collectWebGPUCellPass(params: CollectWebGPUCellPassParams) {
   const {
@@ -180,7 +177,12 @@ export function collectWebGPUCellPass(params: CollectWebGPUCellPassParams) {
     if (!neededGlyphMetaByFont.has(fontIndex)) neededGlyphMetaByFont.set(fontIndex, new Map());
     return neededGlyphMetaByFont.get(fontIndex)!;
   };
-  const noteGlyphMeta = (fontIndex: number, glyphId: number, cp: number, constraintWidth: number) => {
+  const noteGlyphMeta = (
+    fontIndex: number,
+    glyphId: number,
+    cp: number,
+    constraintWidth: number,
+  ) => {
     if (!glyphId || !cp) return;
     const meta = getGlyphMeta(fontIndex);
     const prev = meta.get(glyphId);
@@ -355,8 +357,7 @@ export function collectWebGPUCellPass(params: CollectWebGPUCellPassParams) {
       while (nextSeqIdx < rowEnd && guard < 12) {
         const next = readCellCluster(nextSeqIdx);
         if (!next || !next.cp || isSpaceCp(next.cp)) break;
-        const shouldMerge =
-          text.endsWith("\u200d") || shouldMergeTrailingClusterCodepoint(next.cp);
+        const shouldMerge = text.endsWith("\u200d") || shouldMergeTrailingClusterCodepoint(next.cp);
         if (!shouldMerge) break;
         text += next.text;
         baseSpan += next.span;
@@ -398,7 +399,11 @@ export function collectWebGPUCellPass(params: CollectWebGPUCellPassParams) {
 
       if (extra > 0 && text.trim() === "") continue;
 
-      const fontIndex = pickFontIndexForText(text, baseSpan, stylePreferenceFromFlags(bold, italic));
+      const fontIndex = pickFontIndexForText(
+        text,
+        baseSpan,
+        stylePreferenceFromFlags(bold, italic),
+      );
       const fontEntry = fontState.fonts[fontIndex] ?? fontState.fonts[0];
       const shaped = shapeClusterWithFont(fontEntry, text);
       if (!shaped.glyphs.length) continue;

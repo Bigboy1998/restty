@@ -211,8 +211,9 @@ export function createRuntimeAppApi(options: CreateRuntimeAppApiOptions): Runtim
         document.visibilityState !== "visible";
       const targetRenderFps = hidden ? BACKGROUND_RENDER_FPS : TARGET_RENDER_FPS;
       const nextShared = readState();
-      const renderBudget =
-        resizeActive ? true : now - nextShared.lastRenderTime >= 1000 / targetRenderFps;
+      const renderBudget = resizeActive
+        ? true
+        : now - nextShared.lastRenderTime >= 1000 / targetRenderFps;
       if (nextShared.needsRender && renderBudget) {
         if (internalState.backend === "webgpu" && "device" in state) tickWebGPU(state);
         if (internalState.backend === "webgl2" && "gl" in state) tickWebGL(state);
@@ -294,7 +295,10 @@ export function createRuntimeAppApi(options: CreateRuntimeAppApiOptions): Runtim
       }
       appendLog(`[key] ${JSON.stringify(normalized)}${before}`);
     }
-    if (source === "key" && (interaction.selectionState.active || interaction.selectionState.dragging)) {
+    if (
+      source === "key" &&
+      (interaction.selectionState.active || interaction.selectionState.dragging)
+    ) {
       interaction.clearSelection();
     }
     if (source === "pty" && interaction.linkState.hoverId) interaction.updateLinkHover(null);

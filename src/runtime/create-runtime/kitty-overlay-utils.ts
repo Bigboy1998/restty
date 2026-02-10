@@ -183,7 +183,12 @@ export function computeKittyPartialVirtualFallback(
   const dy = median(anchorYs);
   const dw = srcW * scaleX;
   const dh = srcH * scaleY;
-  if (!Number.isFinite(dx) || !Number.isFinite(dy) || !Number.isFinite(dw) || !Number.isFinite(dh)) {
+  if (
+    !Number.isFinite(dx) ||
+    !Number.isFinite(dy) ||
+    !Number.isFinite(dw) ||
+    !Number.isFinite(dh)
+  ) {
     return null;
   }
   if (dw <= 0 || dh <= 0) return null;

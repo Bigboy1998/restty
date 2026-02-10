@@ -116,7 +116,10 @@ export class ResttyShaderOps {
     return removed;
   }
 
-  normalizePaneShaderStages(stages: ResttyShaderStage[] | undefined, paneId: number): ResttyShaderStage[] {
+  normalizePaneShaderStages(
+    stages: ResttyShaderStage[] | undefined,
+    paneId: number,
+  ): ResttyShaderStage[] {
     if (!stages?.length) return [];
     try {
       return sortShaderStages(normalizeShaderStages(stages));

@@ -146,7 +146,11 @@ export function createShaderStageRuntime(
 
   function ensureWebGLStageTargets(state: WebGLState): WebGLStageTargets | null {
     const { width, height } = options.getCanvasSize();
-    if (webglStageTargets && webglStageTargets.width === width && webglStageTargets.height === height) {
+    if (
+      webglStageTargets &&
+      webglStageTargets.width === width &&
+      webglStageTargets.height === height
+    ) {
       return webglStageTargets;
     }
     destroyWebGLStageTargets(state);
@@ -156,7 +160,11 @@ export function createShaderStageRuntime(
 
   function ensureWebGPUStageTargets(state: WebGPUState): WebGPUStageTargets | null {
     const { width, height } = options.getCanvasSize();
-    if (webgpuStageTargets && webgpuStageTargets.width === width && webgpuStageTargets.height === height) {
+    if (
+      webgpuStageTargets &&
+      webgpuStageTargets.width === width &&
+      webgpuStageTargets.height === height
+    ) {
       return webgpuStageTargets;
     }
     destroyWebGPUStageTargets();

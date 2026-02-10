@@ -1,10 +1,7 @@
 import type { FontEntry } from "../../fonts";
 import type { Color, WebGLState } from "../../renderer";
 import type { CursorInfo, RenderState } from "../../wasm";
-import type {
-  CompiledWebGLShaderStage,
-  WebGLStageTargets,
-} from "../create-app-types";
+import type { CompiledWebGLShaderStage, WebGLStageTargets } from "../create-app-types";
 import type {
   BuildFontAtlasParams,
   BuildFontAtlasResult,
@@ -64,11 +61,7 @@ export type WebGLTickDeps = SharedTickDeps & {
     baselineOffset: number;
     yPad: number;
   };
-  updateImePosition: (
-    cursor: { row: number; col: number },
-    cellW: number,
-    cellH: number,
-  ) => void;
+  updateImePosition: (cursor: { row: number; col: number }, cellW: number, cellH: number) => void;
   canvas: HTMLCanvasElement;
   buildFontAtlasIfNeeded: (params: BuildFontAtlasParams) => BuildFontAtlasResult;
   resolveGlyphPixelMode: AtlasBuilderDeps["resolveGlyphPixelMode"];
@@ -84,11 +77,7 @@ export type WebGLTickDeps = SharedTickDeps & {
   SYMBOL_ATLAS_PADDING: number;
   SYMBOL_ATLAS_MAX_SIZE: number;
   PixelMode: { RGBA?: number };
-  ensureGLInstanceBuffer: (
-    state: WebGLState,
-    kind: "rect" | "glyph",
-    minBytes: number,
-  ) => void;
+  ensureGLInstanceBuffer: (state: WebGLState, kind: "rect" | "glyph", minBytes: number) => void;
   GLYPH_INSTANCE_FLOATS: number;
   wasmHandle: number;
   lastRenderState: RenderState | null;

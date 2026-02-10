@@ -87,4 +87,3 @@ export type LifecycleThemeSizeDeps = {
   markNeedsRender: () => void;
   resetLastRenderTime: () => void;
 };
-

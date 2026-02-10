@@ -6,9 +6,7 @@ import {
   type ResttyPaneShortcutsOptions,
   type ResttyPaneWithApp,
 } from "./panes-types";
-import {
-  createDefaultResttyPaneContextMenuItems,
-} from "./panes/default-context-menu-items";
+import { createDefaultResttyPaneContextMenuItems } from "./panes/default-context-menu-items";
 import { createResttyPaneManager } from "./panes/manager";
 import { getDefaultResttyAppSession } from "../runtime/session";
 import { createResttyApp } from "./app-factory";

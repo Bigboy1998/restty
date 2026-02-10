@@ -1,7 +1,4 @@
-import type {
-  BindCanvasEventsOptions,
-  RuntimeImeState,
-} from "./types";
+import type { BindCanvasEventsOptions, RuntimeImeState } from "./types";
 
 export type BindImeEventsOptions = {
   bindOptions: BindCanvasEventsOptions;

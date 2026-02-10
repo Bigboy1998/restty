@@ -34,7 +34,9 @@ export type PointerAuxHandlers = {
   onPointerLeave: () => void;
 };
 
-export function createPointerAuxHandlers(options: CreatePointerAuxHandlersOptions): PointerAuxHandlers {
+export function createPointerAuxHandlers(
+  options: CreatePointerAuxHandlersOptions,
+): PointerAuxHandlers {
   const {
     inputHandler,
     shouldRoutePointerToAppMouse,

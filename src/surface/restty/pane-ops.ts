@@ -18,7 +18,10 @@ type ResttyLifecycleEmitter = {
   ) => void;
 };
 
-export function requirePaneById(getPaneById: (id: number) => ResttyManagedAppPane | null, id: number): ResttyManagedAppPane {
+export function requirePaneById(
+  getPaneById: (id: number) => ResttyManagedAppPane | null,
+  id: number,
+): ResttyManagedAppPane {
   const pane = getPaneById(id);
   if (!pane) throw new Error(`Restty pane ${id} does not exist`);
   return pane;
@@ -41,7 +44,9 @@ export function requireActivePaneHandle(
   return makePaneHandle(lookup.getPaneById, pane.id);
 }
 
-export function panes(lookup: Pick<ResttyPaneLookup, "getPanes" | "getPaneById">): ResttyPaneHandle[] {
+export function panes(
+  lookup: Pick<ResttyPaneLookup, "getPanes" | "getPaneById">,
+): ResttyPaneHandle[] {
   return lookup.getPanes().map((pane) => makePaneHandle(lookup.getPaneById, pane.id));
 }
 

@@ -9,12 +9,7 @@ import {
 } from "../../fonts";
 import { constrainGlyphBox } from "../../renderer";
 import type { GlyphConstraintMeta, AtlasConstraintContext } from "../atlas-builder";
-import type {
-  GlyphRasterizeOptions,
-  Matrix2D,
-  Matrix3x3,
-  RasterizedGlyph,
-} from "text-shaper";
+import type { GlyphRasterizeOptions, Matrix2D, Matrix3x3, RasterizedGlyph } from "text-shaper";
 import { cloneBitmap, copyBitmapToAtlas, createAtlasBitmap } from "./bitmap-utils";
 import { packGlyphs } from "./packing-utils";
 import { resolveFontScaleForAtlas, tightenNerdConstraintBox } from "./nerd-metrics-utils";

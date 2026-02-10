@@ -121,9 +121,7 @@ import type {
   GlobalWithLocalFontAccess,
 } from "./create-app-types";
 export { createResttyAppSession, getDefaultResttyAppSession } from "./session";
-export {
-  createResttyPaneManager,
-} from "../surface/panes/manager";
+export { createResttyPaneManager } from "../surface/panes/manager";
 export {
   createDefaultResttyPaneContextMenuItems,
   getResttyShortcutModifierLabel,
@@ -1225,7 +1223,19 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   // const defaultConstraint = isAppleSymbolsFont(entry) ? DEFAULT_APPLE_SYMBOLS_CONSTRAINT : DEFAULT_SYMBOL_CONSTRAINT;
   // const constraint = nerdConstraint ?? (colorGlyph ? DEFAULT_EMOJI_CONSTRAINT : defaultConstraint);
   // const nerdConstraint = resolveSymbolConstraint(item.cp);
-  const readRuntimeAppApiState = (): RuntimeAppApiSharedState => ({ wasm, wasmExports, wasmHandle, wasmReady, activeState, needsRender, lastRenderTime, currentContextType, isFocused, lastKeydownSeq, lastKeydownSeqAt });
+  const readRuntimeAppApiState = (): RuntimeAppApiSharedState => ({
+    wasm,
+    wasmExports,
+    wasmHandle,
+    wasmReady,
+    activeState,
+    needsRender,
+    lastRenderTime,
+    currentContextType,
+    isFocused,
+    lastKeydownSeq,
+    lastKeydownSeqAt,
+  });
   const writeRuntimeAppApiState = (patch: Partial<RuntimeAppApiSharedState>) => {
     ({
       wasm = wasm,

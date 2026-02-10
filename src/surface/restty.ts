@@ -130,7 +130,8 @@ export class Restty extends ResttyActivePaneApi {
       pane: (id) => this.pane(id),
       activePane: () => this.activePane(),
       focusedPane: () => this.focusedPane(),
-      addRenderStage: (stage, ownerPluginId) => this.shaderOps.addManagedShaderStage(stage, ownerPluginId),
+      addRenderStage: (stage, ownerPluginId) =>
+        this.shaderOps.addManagedShaderStage(stage, ownerPluginId),
     });
 
     const mergedAppOptions = createMergedPaneAppOptions({
@@ -232,7 +233,12 @@ export class Restty extends ResttyActivePaneApi {
   }
 
   splitActivePane(direction: ResttyPaneSplitDirection): ResttyManagedAppPane | null {
-    return paneOps.splitActivePane(this.paneManager, this.paneLookup(), this.lifecycleHooks(), direction);
+    return paneOps.splitActivePane(
+      this.paneManager,
+      this.paneLookup(),
+      this.lifecycleHooks(),
+      direction,
+    );
   }
 
   splitPane(id: number, direction: ResttyPaneSplitDirection): ResttyManagedAppPane | null {
@@ -256,7 +262,13 @@ export class Restty extends ResttyActivePaneApi {
   }
 
   markPaneFocused(id: number, options?: { focus?: boolean }): void {
-    paneOps.markPaneFocused(this.paneManager, this.paneLookup(), this.lifecycleHooks(), id, options);
+    paneOps.markPaneFocused(
+      this.paneManager,
+      this.paneLookup(),
+      this.lifecycleHooks(),
+      id,
+      options,
+    );
   }
 
   requestLayoutSync(): void {

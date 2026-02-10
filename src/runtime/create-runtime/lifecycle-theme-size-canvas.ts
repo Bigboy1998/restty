@@ -1,7 +1,4 @@
-import type {
-  CanvasStateSnapshot,
-  LifecycleThemeSizeDeps,
-} from "./lifecycle-theme-size.types";
+import type { CanvasStateSnapshot, LifecycleThemeSizeDeps } from "./lifecycle-theme-size.types";
 
 export function createLifecycleCanvasHandlers(deps: LifecycleThemeSizeDeps) {
   let sizeRaf = 0;

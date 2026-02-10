@@ -55,7 +55,9 @@ export function createDumpGlyphRender(options: CreateRuntimeDebugToolsOptions) {
     const primaryScale = primaryEntry?.font
       ? primaryEntry.font.scaleForSize(fontSizePx, fontState.sizeMode)
       : 1;
-    const lineHeight = primaryEntry?.font ? fontHeightUnits(primaryEntry.font) * primaryScale : cellH;
+    const lineHeight = primaryEntry?.font
+      ? fontHeightUnits(primaryEntry.font) * primaryScale
+      : cellH;
     const baselineOffset = primaryEntry?.font ? primaryEntry.font.ascender * primaryScale : 0;
     const yPad = gridState.yPad ?? (cellH - lineHeight) * 0.5;
 
@@ -152,24 +154,7 @@ export function createDumpGlyphRender(options: CreateRuntimeDebugToolsOptions) {
     const uniforms = new Float32Array([outW, outH, 0, 0, 0, 0, 0, 0]);
     state.device.queue.writeBuffer(uniformBuffer, 0, uniforms);
 
-    const instance = new Float32Array([
-      0,
-      0,
-      outW,
-      outH,
-      u0,
-      v0,
-      u1,
-      v1,
-      1,
-      1,
-      1,
-      1,
-      0,
-      0,
-      0,
-      1,
-    ]);
+    const instance = new Float32Array([0, 0, outW, outH, u0, v0, u1, v1, 1, 1, 1, 1, 0, 0, 0, 1]);
     const instanceBuffer = state.device.createBuffer({
       size: instance.byteLength,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,

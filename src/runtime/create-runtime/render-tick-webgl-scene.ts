@@ -214,8 +214,7 @@ export function populateWebGLSceneData(ctx: WebGLTickContext) {
       while (nextSeqIdx < rowEnd && guard < 12) {
         const next = readCellCluster(nextSeqIdx);
         if (!next || !next.cp || isSpaceCp(next.cp)) break;
-        const shouldMerge =
-          text.endsWith("\u200d") || shouldMergeTrailingClusterCodepoint(next.cp);
+        const shouldMerge = text.endsWith("\u200d") || shouldMergeTrailingClusterCodepoint(next.cp);
         if (!shouldMerge) break;
         text += next.text;
         baseSpan += next.span;
@@ -253,7 +252,11 @@ export function populateWebGLSceneData(ctx: WebGLTickContext) {
 
       if (extra > 0 && text.trim() === "") continue;
 
-      const fontIndex = pickFontIndexForText(text, baseSpan, stylePreferenceFromFlags(bold, italic));
+      const fontIndex = pickFontIndexForText(
+        text,
+        baseSpan,
+        stylePreferenceFromFlags(bold, italic),
+      );
       const fontEntry = fontState.fonts[fontIndex] ?? fontState.fonts[0];
       const shaped = shapeClusterWithFont(fontEntry, text);
       if (!shaped.glyphs.length) continue;

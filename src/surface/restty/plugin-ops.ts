@@ -73,7 +73,9 @@ export class ResttyPluginOps {
     this.pluginDiagnostics.set(pluginId, {
       id: pluginId,
       version: runtime.plugin.version?.trim?.() || null,
-      apiVersion: Number.isFinite(runtime.plugin.apiVersion) ? Number(runtime.plugin.apiVersion) : null,
+      apiVersion: Number.isFinite(runtime.plugin.apiVersion)
+        ? Number(runtime.plugin.apiVersion)
+        : null,
       requires: runtime.plugin.requires ?? null,
       active: false,
       activatedAt: null,
