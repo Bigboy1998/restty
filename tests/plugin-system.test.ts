@@ -30,6 +30,8 @@ type FakePane = {
     blur: () => void;
     updateSize: () => void;
     getBackend: () => string;
+    setShaderStages: (stages: Array<Record<string, unknown>>) => void;
+    getShaderStages: () => Array<Record<string, unknown>>;
   };
   __writes: Array<{ kind: "input" | "key"; text: string; source: string }>;
   __callbacks: {
@@ -40,6 +42,7 @@ type FakePane = {
       raw: string;
     }) => void;
   };
+  __shaderStages: Array<Record<string, unknown>>;
 };
 
 type FakeManager = {
@@ -97,6 +100,9 @@ function createFakeManager(options: any): FakeManager {
             termDebugEl: {},
           })
         : (options.appOptions ?? {});
+    let paneShaderStages: Array<Record<string, unknown>> = Array.isArray(appOptions.shaderStages)
+      ? appOptions.shaderStages.map((stage: Record<string, unknown>) => ({ ...stage }))
+      : [];
     let ptyConnected = false;
     const writes: Array<{ kind: "input" | "key"; text: string; source: string }> = [];
     const app = {
@@ -147,6 +153,11 @@ function createFakeManager(options: any): FakeManager {
       blur: () => {},
       updateSize: () => {},
       getBackend: () => "test",
+      setShaderStages: (stages: Array<Record<string, unknown>>) => {
+        paneShaderStages = stages.map((stage) => ({ ...stage }));
+        pane.__shaderStages = paneShaderStages.map((stage) => ({ ...stage }));
+      },
+      getShaderStages: () => paneShaderStages.map((stage) => ({ ...stage })),
     };
     const pane: FakePane = {
       id,
@@ -161,6 +172,7 @@ function createFakeManager(options: any): FakeManager {
       __callbacks: {
         onDesktopNotification: appOptions.callbacks?.onDesktopNotification,
       },
+      __shaderStages: paneShaderStages.map((stage) => ({ ...stage })),
     };
     panes.set(id, pane);
     options.onPaneCreated?.(pane);
@@ -325,6 +337,68 @@ test("restty onDesktopNotification callback receives paneId and preserves pane c
   ]);
 });
 
+test("restty shader stage API syncs stages to existing panes and supports handle updates", () => {
+  const restty = createRestty();
+  const pane = restty.createInitialPane() as FakePane;
+  const handle = restty.addShaderStage({
+    id: "fx/crt",
+    mode: "after-main",
+    uniforms: [0.2, 0.7],
+    shader: {
+      wgsl:
+        "fn resttyStage(color: vec4f, uv: vec2f, time: f32, params0: vec4f, params1: vec4f) -> vec4f { return color; }",
+      glsl:
+        "vec4 resttyStage(vec4 color, vec2 uv, float time, vec4 params0, vec4 params1) { return color; }",
+    },
+  });
+
+  expect(restty.getShaderStages().map((stage) => stage.id)).toEqual(["fx/crt"]);
+  expect(pane.__shaderStages.map((stage) => String(stage.id))).toEqual(["fx/crt"]);
+
+  handle.setUniforms([0.9, 0.1, 0.5]);
+  const afterUniforms = restty.getShaderStages()[0];
+  expect(afterUniforms?.uniforms).toEqual([0.9, 0.1, 0.5]);
+
+  handle.setEnabled(false);
+  const afterEnabled = restty.getShaderStages()[0];
+  expect(afterEnabled?.enabled).toBe(false);
+
+  handle.dispose();
+  expect(restty.getShaderStages()).toEqual([]);
+  expect(pane.__shaderStages).toEqual([]);
+});
+
+test("plugin addRenderStage registers namespaced stage and cleans up on unuse", async () => {
+  const restty = createRestty();
+  const pane = restty.createInitialPane() as FakePane;
+
+  await restty.use({
+    id: "plugin/stage",
+    activate(ctx) {
+      const stage = ctx.addRenderStage({
+        id: "mono-green",
+        mode: "after-main",
+        uniforms: [0.8],
+        shader: {
+          wgsl:
+            "fn resttyStage(color: vec4f, uv: vec2f, time: f32, params0: vec4f, params1: vec4f) -> vec4f { return color; }",
+          glsl:
+            "vec4 resttyStage(vec4 color, vec2 uv, float time, vec4 params0, vec4 params1) { return color; }",
+        },
+      });
+      stage.setEnabled(true);
+      return () => stage.dispose();
+    },
+  });
+
+  expect(restty.getShaderStages().map((stage) => stage.id)).toEqual(["plugin/stage:mono-green"]);
+  expect(pane.__shaderStages.map((stage) => String(stage.id))).toEqual(["plugin/stage:mono-green"]);
+
+  expect(restty.unuse("plugin/stage")).toBe(true);
+  expect(restty.getShaderStages()).toEqual([]);
+  expect(pane.__shaderStages).toEqual([]);
+});
+
 test("pluginInfo reports metadata, status, and active disposer counts", async () => {
   const restty = createRestty();
   restty.createInitialPane();
@@ -363,6 +437,7 @@ test("pluginInfo reports metadata, status, and active disposer counts", async ()
   expect(info?.outputInterceptors).toBe(1);
   expect(info?.lifecycleHooks).toBe(1);
   expect(info?.renderHooks).toBe(1);
+  expect(info?.renderStages).toBe(0);
   expect(Array.isArray(restty.pluginInfo())).toBe(true);
 
   disposeRuntime?.();
@@ -372,6 +447,7 @@ test("pluginInfo reports metadata, status, and active disposer counts", async ()
   expect(afterManualDispose?.outputInterceptors).toBe(0);
   expect(afterManualDispose?.lifecycleHooks).toBe(0);
   expect(afterManualDispose?.renderHooks).toBe(0);
+  expect(afterManualDispose?.renderStages).toBe(0);
 });
 
 test("manifest registry loading activates plugins and returns per-entry status", async () => {

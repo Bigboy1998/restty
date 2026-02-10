@@ -43,6 +43,8 @@ type FakePane = {
     blur: () => void;
     updateSize: () => void;
     getBackend: () => string;
+    setShaderStages: (stages: Array<Record<string, unknown>>) => void;
+    getShaderStages: () => Array<Record<string, unknown>>;
   };
 };
 
@@ -161,6 +163,8 @@ function createFakeManager(options: any): FakeManager {
       },
       updateSize: () => {},
       getBackend: () => "test",
+      setShaderStages: (_stages: Array<Record<string, unknown>>) => {},
+      getShaderStages: () => [],
     };
 
     const pane: FakePane = {

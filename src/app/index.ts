@@ -63,9 +63,17 @@ import type {
   ResttyFontSource,
   ResttyApp,
   ResttyAppOptions,
+  ResttyShaderStage,
   ResttyTouchSelectionMode,
 } from "./types";
 import { getDefaultResttyAppSession } from "./session";
+import {
+  cloneShaderStages,
+  isShaderStageEnabledForBackend,
+  normalizeShaderStages,
+  packShaderStageUniforms,
+  sortShaderStages,
+} from "./shader-stages";
 export { createResttyAppSession, getDefaultResttyAppSession } from "./session";
 export {
   createResttyPaneManager,
@@ -86,6 +94,10 @@ export type {
   ResttyWasmLogListener,
   ResttyAppSession,
   ResttyAppInputPayload,
+  ResttyShaderStage,
+  ResttyShaderStageMode,
+  ResttyShaderStageBackend,
+  ResttyShaderStageSource,
   ResttyAppOptions,
   ResttyApp,
 } from "./types";
@@ -126,6 +138,7 @@ export type {
   ResttyRenderHookPayload,
   ResttyOutputInterceptor,
   ResttyOutputInterceptorPayload,
+  ResttyRenderStageHandle,
 } from "./restty";
 
 function normalizeTouchSelectionMode(
@@ -230,6 +243,126 @@ type ResttyDebugWindow = Window &
     ) => Promise<ImageData | null>;
     dumpGlyphRender?: (cp: number, constraintWidth?: number) => Promise<unknown>;
   };
+
+const STAGE_UNIFORM_BUFFER_FLOATS = 12;
+
+const FULLSCREEN_STAGE_VERTEX_SHADER_GL = `#version 300 es
+precision highp float;
+layout(location = 0) in vec2 a_quad;
+out vec2 v_uv;
+void main() {
+  v_uv = a_quad;
+  vec2 clip = vec2(a_quad.x * 2.0 - 1.0, 1.0 - a_quad.y * 2.0);
+  gl_Position = vec4(clip, 0.0, 1.0);
+}
+`;
+
+const FULLSCREEN_STAGE_SHADER_GL_PREFIX = `#version 300 es
+precision highp float;
+uniform sampler2D u_source;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec4 u_params0;
+uniform vec4 u_params1;
+in vec2 v_uv;
+out vec4 fragColor;
+`;
+
+const FULLSCREEN_STAGE_SHADER_GL_SUFFIX = `
+void main() {
+  vec4 color = texture(u_source, v_uv);
+  fragColor = resttyStage(color, v_uv, u_time, u_params0, u_params1);
+}
+`;
+
+const FULLSCREEN_STAGE_SHADER_WGSL_PREFIX = `
+struct StageUniforms {
+  resolution: vec2f,
+  time: f32,
+  _pad0: f32,
+  params0: vec4f,
+  params1: vec4f,
+};
+
+@group(0) @binding(0) var sourceSampler: sampler;
+@group(0) @binding(1) var sourceTex: texture_2d<f32>;
+@group(0) @binding(2) var<uniform> stageUniforms: StageUniforms;
+
+struct VSOut {
+  @builtin(position) position: vec4f,
+  @location(0) uv: vec2f,
+};
+
+@vertex
+fn vsMain(@location(0) quad: vec2f) -> VSOut {
+  var out: VSOut;
+  out.uv = quad;
+  let clip = vec2f(quad.x * 2.0 - 1.0, 1.0 - quad.y * 2.0);
+  out.position = vec4f(clip.x, clip.y, 0.0, 1.0);
+  return out;
+}
+`;
+
+const FULLSCREEN_STAGE_SHADER_WGSL_SUFFIX = `
+@fragment
+fn fsMain(input: VSOut) -> @location(0) vec4f {
+  let color = textureSample(sourceTex, sourceSampler, input.uv);
+  return resttyStage(
+    color,
+    input.uv,
+    stageUniforms.time,
+    stageUniforms.params0,
+    stageUniforms.params1,
+  );
+}
+`;
+
+type CompiledWebGPUShaderStage = {
+  stage: ResttyShaderStage;
+  pipeline: GPURenderPipeline;
+  uniformBuffer: GPUBuffer;
+  uniformData: Float32Array;
+  params: Float32Array;
+  sampler: GPUSampler;
+  bindGroupScene: GPUBindGroup | null;
+  bindGroupPing: GPUBindGroup | null;
+  bindGroupPong: GPUBindGroup | null;
+};
+
+type WebGPUStageTargets = {
+  width: number;
+  height: number;
+  sceneTexture: GPUTexture;
+  sceneView: GPUTextureView;
+  pingTexture: GPUTexture;
+  pingView: GPUTextureView;
+  pongTexture: GPUTexture;
+  pongView: GPUTextureView;
+};
+
+type CompiledWebGLShaderStage = {
+  stage: ResttyShaderStage;
+  program: WebGLProgram;
+  sourceLoc: WebGLUniformLocation;
+  resolutionLoc: WebGLUniformLocation;
+  timeLoc: WebGLUniformLocation;
+  params0Loc: WebGLUniformLocation;
+  params1Loc: WebGLUniformLocation;
+  params: Float32Array;
+};
+
+type WebGLStageTargets = {
+  width: number;
+  height: number;
+  quadVao: WebGLVertexArrayObject;
+  quadBuffer: WebGLBuffer;
+  sceneTexture: WebGLTexture;
+  sceneFramebuffer: WebGLFramebuffer;
+  pingTexture: WebGLTexture;
+  pingFramebuffer: WebGLFramebuffer;
+  pongTexture: WebGLTexture;
+  pongFramebuffer: WebGLFramebuffer;
+};
 
 export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   const { canvas: canvasInput, imeInput: imeInputInput, elements, callbacks } = options;
@@ -413,6 +546,12 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   let lastReportedCursorRow = -1;
   let lastReportedDebugText = "";
   const webgpuUniforms = new Float32Array(8);
+  let shaderStages: ResttyShaderStage[] = [];
+  let compiledWebGPUShaderStages: CompiledWebGPUShaderStage[] = [];
+  let compiledWebGLShaderStages: CompiledWebGLShaderStage[] = [];
+  let webgpuStageTargets: WebGPUStageTargets | null = null;
+  let webglStageTargets: WebGLStageTargets | null = null;
+  let shaderStagesDirty = true;
   const logBuffer: string[] = [];
   const LOG_LIMIT = 200;
   const WASM_LOG_FILTERS = [
@@ -3558,6 +3697,416 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     callbacks?.onLog?.(entry);
   }
 
+  function reportShaderStageError(stage: ResttyShaderStage, message: string): void {
+    const text = `[shader-stage:${stage.id}] ${message}`;
+    appendLog(text);
+    console.warn(text);
+    try {
+      stage.onError?.(text);
+    } catch {
+      // Ignore user callback errors from per-stage handlers.
+    }
+  }
+
+  function parseShaderStages(stages: ResttyShaderStage[]): ResttyShaderStage[] {
+    return sortShaderStages(normalizeShaderStages(cloneShaderStages(stages)));
+  }
+
+  function getActiveShaderStagesForBackend(target: "webgpu" | "webgl2"): ResttyShaderStage[] {
+    const out: ResttyShaderStage[] = [];
+    for (let i = 0; i < shaderStages.length; i += 1) {
+      const stage = shaderStages[i];
+      if (!isShaderStageEnabledForBackend(stage, target)) continue;
+      if (stage.mode === "replace-main") {
+        reportShaderStageError(stage, "replace-main is not supported yet; stage skipped");
+        continue;
+      }
+      if (target === "webgpu" && !stage.shader.wgsl) {
+        reportShaderStageError(stage, "missing WGSL source for webgpu backend; stage skipped");
+        continue;
+      }
+      if (target === "webgl2" && !stage.shader.glsl) {
+        reportShaderStageError(stage, "missing GLSL source for webgl2 backend; stage skipped");
+        continue;
+      }
+      out.push(stage);
+    }
+    return out;
+  }
+
+  function clearWebGPUShaderStages(): void {
+    for (let i = 0; i < compiledWebGPUShaderStages.length; i += 1) {
+      try {
+        compiledWebGPUShaderStages[i].uniformBuffer.destroy();
+      } catch {
+        // Ignore GPU cleanup errors during backend switches.
+      }
+    }
+    compiledWebGPUShaderStages = [];
+  }
+
+  function clearWebGLShaderStages(state?: WebGLState | null): void {
+    const gl = state?.gl ?? (activeState && "gl" in activeState ? activeState.gl : null);
+    if (!gl) {
+      compiledWebGLShaderStages = [];
+      return;
+    }
+    for (let i = 0; i < compiledWebGLShaderStages.length; i += 1) {
+      gl.deleteProgram(compiledWebGLShaderStages[i].program);
+    }
+    compiledWebGLShaderStages = [];
+  }
+
+  function destroyWebGPUStageTargets(): void {
+    if (!webgpuStageTargets) return;
+    try {
+      webgpuStageTargets.sceneTexture.destroy();
+      webgpuStageTargets.pingTexture.destroy();
+      webgpuStageTargets.pongTexture.destroy();
+    } catch {
+      // Ignore GPU cleanup errors during backend switches.
+    }
+    webgpuStageTargets = null;
+  }
+
+  function destroyWebGLStageTargets(state?: WebGLState | null): void {
+    if (!webglStageTargets) return;
+    const gl = state?.gl ?? (activeState && "gl" in activeState ? activeState.gl : null);
+    if (gl) {
+      gl.deleteVertexArray(webglStageTargets.quadVao);
+      gl.deleteBuffer(webglStageTargets.quadBuffer);
+      gl.deleteFramebuffer(webglStageTargets.sceneFramebuffer);
+      gl.deleteFramebuffer(webglStageTargets.pingFramebuffer);
+      gl.deleteFramebuffer(webglStageTargets.pongFramebuffer);
+      gl.deleteTexture(webglStageTargets.sceneTexture);
+      gl.deleteTexture(webglStageTargets.pingTexture);
+      gl.deleteTexture(webglStageTargets.pongTexture);
+    }
+    webglStageTargets = null;
+  }
+
+  function compileShaderStageProgram(
+    gl: WebGL2RenderingContext,
+    stage: ResttyShaderStage,
+  ): CompiledWebGLShaderStage | null {
+    const createShader = (type: number, source: string): WebGLShader | null => {
+      const shader = gl.createShader(type);
+      if (!shader) return null;
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        const error = gl.getShaderInfoLog(shader) ?? "unknown compile error";
+        reportShaderStageError(stage, `GLSL compile failed: ${error}`);
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    };
+
+    const vert = createShader(gl.VERTEX_SHADER, FULLSCREEN_STAGE_VERTEX_SHADER_GL);
+    const frag = createShader(
+      gl.FRAGMENT_SHADER,
+      `${FULLSCREEN_STAGE_SHADER_GL_PREFIX}${stage.shader.glsl ?? ""}${FULLSCREEN_STAGE_SHADER_GL_SUFFIX}`,
+    );
+    if (!vert || !frag) {
+      if (vert) gl.deleteShader(vert);
+      if (frag) gl.deleteShader(frag);
+      return null;
+    }
+
+    const program = gl.createProgram();
+    if (!program) {
+      gl.deleteShader(vert);
+      gl.deleteShader(frag);
+      reportShaderStageError(stage, "GLSL link failed: program allocation failed");
+      return null;
+    }
+    gl.attachShader(program, vert);
+    gl.attachShader(program, frag);
+    gl.linkProgram(program);
+    gl.deleteShader(vert);
+    gl.deleteShader(frag);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      const error = gl.getProgramInfoLog(program) ?? "unknown link error";
+      reportShaderStageError(stage, `GLSL link failed: ${error}`);
+      gl.deleteProgram(program);
+      return null;
+    }
+
+    const sourceLoc = gl.getUniformLocation(program, "u_source");
+    const resolutionLoc = gl.getUniformLocation(program, "u_resolution");
+    const timeLoc = gl.getUniformLocation(program, "u_time");
+    const params0Loc = gl.getUniformLocation(program, "u_params0");
+    const params1Loc = gl.getUniformLocation(program, "u_params1");
+    if (!sourceLoc || !resolutionLoc || !timeLoc || !params0Loc || !params1Loc) {
+      gl.deleteProgram(program);
+      reportShaderStageError(stage, "GLSL link failed: required uniforms are missing");
+      return null;
+    }
+
+    return {
+      stage,
+      program,
+      sourceLoc,
+      resolutionLoc,
+      timeLoc,
+      params0Loc,
+      params1Loc,
+      params: packShaderStageUniforms(stage),
+    };
+  }
+
+  function createWebGLStageTexture(
+    gl: WebGL2RenderingContext,
+    width: number,
+    height: number,
+  ): WebGLTexture | null {
+    const texture = gl.createTexture();
+    if (!texture) return null;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return texture;
+  }
+
+  function createWebGLStageFramebuffer(
+    gl: WebGL2RenderingContext,
+    texture: WebGLTexture,
+  ): WebGLFramebuffer | null {
+    const fb = gl.createFramebuffer();
+    if (!fb) return null;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.deleteFramebuffer(fb);
+      return null;
+    }
+    return fb;
+  }
+
+  function ensureWebGLStageTargets(state: WebGLState): WebGLStageTargets | null {
+    if (
+      webglStageTargets &&
+      webglStageTargets.width === canvas.width &&
+      webglStageTargets.height === canvas.height
+    ) {
+      return webglStageTargets;
+    }
+
+    const { gl } = state;
+    destroyWebGLStageTargets(state);
+
+    const quadBuffer = gl.createBuffer();
+    const quadVao = gl.createVertexArray();
+    if (!quadBuffer || !quadVao) return null;
+    const quadVertices = new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
+    gl.bindVertexArray(quadVao);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+
+    const sceneTexture = createWebGLStageTexture(gl, canvas.width, canvas.height);
+    const pingTexture = createWebGLStageTexture(gl, canvas.width, canvas.height);
+    const pongTexture = createWebGLStageTexture(gl, canvas.width, canvas.height);
+    if (!sceneTexture || !pingTexture || !pongTexture) {
+      return null;
+    }
+    const sceneFramebuffer = createWebGLStageFramebuffer(gl, sceneTexture);
+    const pingFramebuffer = createWebGLStageFramebuffer(gl, pingTexture);
+    const pongFramebuffer = createWebGLStageFramebuffer(gl, pongTexture);
+    if (!sceneFramebuffer || !pingFramebuffer || !pongFramebuffer) {
+      return null;
+    }
+
+    webglStageTargets = {
+      width: canvas.width,
+      height: canvas.height,
+      quadVao,
+      quadBuffer,
+      sceneTexture,
+      sceneFramebuffer,
+      pingTexture,
+      pingFramebuffer,
+      pongTexture,
+      pongFramebuffer,
+    };
+    return webglStageTargets;
+  }
+
+  function compileShaderStagePipelineWebGPU(
+    state: WebGPUState,
+    stage: ResttyShaderStage,
+  ): CompiledWebGPUShaderStage | null {
+    const shaderSource = `${FULLSCREEN_STAGE_SHADER_WGSL_PREFIX}${stage.shader.wgsl ?? ""}${FULLSCREEN_STAGE_SHADER_WGSL_SUFFIX}`;
+    try {
+      const module = state.device.createShaderModule({ code: shaderSource });
+      const pipeline = state.device.createRenderPipeline({
+        layout: "auto",
+        vertex: {
+          module,
+          entryPoint: "vsMain",
+          buffers: [{ arrayStride: 8, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x2" }] }],
+        },
+        fragment: {
+          module,
+          entryPoint: "fsMain",
+          targets: [{ format: state.format }],
+        },
+        primitive: { topology: "triangle-list", cullMode: "none" },
+      });
+
+      const uniformBuffer = state.device.createBuffer({
+        size: STAGE_UNIFORM_BUFFER_FLOATS * 4,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+      const sampler = state.device.createSampler({
+        magFilter: "linear",
+        minFilter: "linear",
+        addressModeU: "clamp-to-edge",
+        addressModeV: "clamp-to-edge",
+      });
+      return {
+        stage,
+        pipeline,
+        uniformBuffer,
+        uniformData: new Float32Array(STAGE_UNIFORM_BUFFER_FLOATS),
+        params: packShaderStageUniforms(stage),
+        sampler,
+        bindGroupScene: null,
+        bindGroupPing: null,
+        bindGroupPong: null,
+      };
+    } catch (error: any) {
+      reportShaderStageError(stage, `WGSL compile failed: ${error?.message ?? error}`);
+      return null;
+    }
+  }
+
+  function ensureWebGPUStageTargets(state: WebGPUState): WebGPUStageTargets | null {
+    if (
+      webgpuStageTargets &&
+      webgpuStageTargets.width === canvas.width &&
+      webgpuStageTargets.height === canvas.height
+    ) {
+      return webgpuStageTargets;
+    }
+
+    destroyWebGPUStageTargets();
+    const usage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING;
+    const sceneTexture = state.device.createTexture({
+      size: [canvas.width, canvas.height, 1],
+      format: state.format,
+      usage,
+    });
+    const pingTexture = state.device.createTexture({
+      size: [canvas.width, canvas.height, 1],
+      format: state.format,
+      usage,
+    });
+    const pongTexture = state.device.createTexture({
+      size: [canvas.width, canvas.height, 1],
+      format: state.format,
+      usage,
+    });
+    webgpuStageTargets = {
+      width: canvas.width,
+      height: canvas.height,
+      sceneTexture,
+      sceneView: sceneTexture.createView(),
+      pingTexture,
+      pingView: pingTexture.createView(),
+      pongTexture,
+      pongView: pongTexture.createView(),
+    };
+    if (compiledWebGPUShaderStages.length) {
+      rebuildWebGPUStageBindGroups(state);
+    }
+    return webgpuStageTargets;
+  }
+
+  function rebuildWebGPUStageBindGroups(state: WebGPUState): void {
+    const targets = ensureWebGPUStageTargets(state);
+    if (!targets) return;
+    for (let i = 0; i < compiledWebGPUShaderStages.length; i += 1) {
+      const stage = compiledWebGPUShaderStages[i];
+      const layout = stage.pipeline.getBindGroupLayout(0);
+      stage.bindGroupScene = state.device.createBindGroup({
+        layout,
+        entries: [
+          { binding: 0, resource: stage.sampler },
+          { binding: 1, resource: targets.sceneView },
+          { binding: 2, resource: { buffer: stage.uniformBuffer } },
+        ],
+      });
+      stage.bindGroupPing = state.device.createBindGroup({
+        layout,
+        entries: [
+          { binding: 0, resource: stage.sampler },
+          { binding: 1, resource: targets.pingView },
+          { binding: 2, resource: { buffer: stage.uniformBuffer } },
+        ],
+      });
+      stage.bindGroupPong = state.device.createBindGroup({
+        layout,
+        entries: [
+          { binding: 0, resource: stage.sampler },
+          { binding: 1, resource: targets.pongView },
+          { binding: 2, resource: { buffer: stage.uniformBuffer } },
+        ],
+      });
+    }
+  }
+
+  function rebuildWebGPUShaderStages(state: WebGPUState): void {
+    clearWebGPUShaderStages();
+    const nextStages = getActiveShaderStagesForBackend("webgpu");
+    for (let i = 0; i < nextStages.length; i += 1) {
+      const compiled = compileShaderStagePipelineWebGPU(state, nextStages[i]);
+      if (compiled) compiledWebGPUShaderStages.push(compiled);
+    }
+    if (!compiledWebGPUShaderStages.length) {
+      destroyWebGPUStageTargets();
+      return;
+    }
+    rebuildWebGPUStageBindGroups(state);
+  }
+
+  function rebuildWebGLShaderStages(state: WebGLState): void {
+    clearWebGLShaderStages(state);
+    const nextStages = getActiveShaderStagesForBackend("webgl2");
+    for (let i = 0; i < nextStages.length; i += 1) {
+      const compiled = compileShaderStageProgram(state.gl, nextStages[i]);
+      if (compiled) compiledWebGLShaderStages.push(compiled);
+    }
+    if (!compiledWebGLShaderStages.length) {
+      destroyWebGLStageTargets(state);
+    }
+  }
+
+  function setShaderStages(stages: ResttyShaderStage[]): void {
+    try {
+      shaderStages = parseShaderStages(stages ?? []);
+    } catch (error: any) {
+      const text = `[shader-stage] invalid configuration: ${error?.message ?? error}`;
+      appendLog(text);
+      console.warn(text);
+      shaderStages = [];
+    }
+    shaderStagesDirty = true;
+    needsRender = true;
+  }
+
+  function getShaderStages(): ResttyShaderStage[] {
+    return cloneShaderStages(shaderStages);
+  }
+
+  setShaderStages(options.shaderStages ?? []);
+
   function applyTheme(theme, sourceLabel = "theme") {
     if (!theme) return;
 
@@ -3694,6 +4243,14 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     }
     kittyOverlayCanvas = null;
     kittyOverlayCtx = null;
+    destroyWebGPUStageTargets();
+    if (activeState && "gl" in activeState) {
+      clearWebGLShaderStages(activeState);
+      destroyWebGLStageTargets(activeState);
+    } else {
+      clearWebGLShaderStages();
+      destroyWebGLStageTargets();
+    }
 
     const newCanvas = document.createElement("canvas");
     newCanvas.id = canvas.id;
@@ -3721,6 +4278,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     if (activeState && activeState.glyphAtlases) {
       activeState.glyphAtlases.clear();
     }
+    shaderStagesDirty = true;
   }
 
   function updateSize(force = false) {
@@ -4918,6 +5476,16 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
 
   function tickWebGPU(state) {
     const { device, context } = state;
+    if (shaderStagesDirty) {
+      rebuildWebGPUShaderStages(state);
+      shaderStagesDirty = false;
+    }
+    const shaderStageCount = compiledWebGPUShaderStages.length;
+    const stageTargets =
+      shaderStageCount > 0
+        ? ensureWebGPUStageTargets(state)
+        : null;
+    const hasShaderStages = shaderStageCount > 0 && !!stageTargets;
 
     if (fontError) {
       const text = `Font error: ${fontError.message}`;
@@ -4938,10 +5506,11 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
       const { useLinearBlending } = resolveBlendFlags("webgpu", state);
       const clearColor = useLinearBlending ? srgbToLinearColor(defaultBg) : defaultBg;
       const encoder = device.createCommandEncoder();
+      const presentView = context.getCurrentTexture().createView();
       const pass = encoder.beginRenderPass({
         colorAttachments: [
           {
-            view: context.getCurrentTexture().createView(),
+            view: presentView,
             clearValue: { r: clearColor[0], g: clearColor[1], b: clearColor[2], a: clearColor[3] },
             loadOp: "clear",
             storeOp: "store",
@@ -5863,11 +6432,13 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
     webgpuUniforms[7] = 0;
     device.queue.writeBuffer(state.uniformBuffer, 0, webgpuUniforms);
 
+    const presentView = context.getCurrentTexture().createView();
+    const mainView = hasShaderStages && stageTargets ? stageTargets.sceneView : presentView;
     const encoder = device.createCommandEncoder();
     const pass = encoder.beginRenderPass({
       colorAttachments: [
         {
-          view: context.getCurrentTexture().createView(),
+          view: mainView,
           clearValue: { r: clearColor[0], g: clearColor[1], b: clearColor[2], a: clearColor[3] },
           loadOp: "clear",
           storeOp: "store",
@@ -6030,6 +6601,62 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
     drawGlyphBatches(glyphOverlayBatches);
 
     pass.end();
+
+    if (hasShaderStages && stageTargets) {
+      let source = "scene";
+      const nowSec = performance.now() * 0.001;
+      for (let i = 0; i < compiledWebGPUShaderStages.length; i += 1) {
+        const stage = compiledWebGPUShaderStages[i];
+        stage.uniformData[0] = canvas.width;
+        stage.uniformData[1] = canvas.height;
+        stage.uniformData[2] = nowSec;
+        stage.uniformData[3] = 0;
+        stage.uniformData[4] = stage.params[0] ?? 0;
+        stage.uniformData[5] = stage.params[1] ?? 0;
+        stage.uniformData[6] = stage.params[2] ?? 0;
+        stage.uniformData[7] = stage.params[3] ?? 0;
+        stage.uniformData[8] = stage.params[4] ?? 0;
+        stage.uniformData[9] = stage.params[5] ?? 0;
+        stage.uniformData[10] = stage.params[6] ?? 0;
+        stage.uniformData[11] = stage.params[7] ?? 0;
+        device.queue.writeBuffer(stage.uniformBuffer, 0, stage.uniformData);
+
+        const isLast = i === compiledWebGPUShaderStages.length - 1;
+        const target =
+          !isLast
+            ? source === "ping"
+              ? stageTargets.pongView
+              : stageTargets.pingView
+            : presentView;
+        const bindGroup =
+          source === "scene"
+            ? stage.bindGroupScene
+            : source === "ping"
+              ? stage.bindGroupPing
+              : stage.bindGroupPong;
+        if (!bindGroup) continue;
+        const stagePass = encoder.beginRenderPass({
+          colorAttachments: [
+            {
+              view: target,
+              clearValue: { r: 0, g: 0, b: 0, a: 1 },
+              loadOp: "clear",
+              storeOp: "store",
+            },
+          ],
+        });
+        stagePass.setPipeline(stage.pipeline);
+        stagePass.setBindGroup(0, bindGroup);
+        stagePass.setVertexBuffer(0, state.vertexBuffer);
+        stagePass.draw(6, 1, 0, 0);
+        stagePass.end();
+
+        if (!isLast) {
+          source = source === "ping" ? "pong" : "ping";
+        }
+      }
+    }
+
     device.queue.submit([encoder.finish()]);
     const kittyPlacements = wasm && wasmHandle ? wasm.getKittyPlacements(wasmHandle) : [];
     drawKittyOverlay(kittyPlacements, cellW, cellH);
@@ -6037,8 +6664,18 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
 
   function tickWebGL(state: WebGLState) {
     const { gl } = state;
+    if (shaderStagesDirty) {
+      rebuildWebGLShaderStages(state);
+      shaderStagesDirty = false;
+    }
+    const stageTargets =
+      compiledWebGLShaderStages.length > 0
+        ? ensureWebGLStageTargets(state)
+        : null;
+    const hasShaderStages = compiledWebGLShaderStages.length > 0 && !!stageTargets;
 
     gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, hasShaderStages && stageTargets ? stageTargets.sceneFramebuffer : null);
     gl.clearColor(defaultBg[0], defaultBg[1], defaultBg[2], defaultBg[3]);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -7035,6 +7672,52 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
       drawGlyphs(fontIndex, glyphData);
     }
 
+    if (hasShaderStages && stageTargets) {
+      gl.disable(gl.BLEND);
+      gl.bindVertexArray(stageTargets.quadVao);
+      const nowSec = performance.now() * 0.001;
+      let sourceTex = stageTargets.sceneTexture;
+      for (let i = 0; i < compiledWebGLShaderStages.length; i += 1) {
+        const stage = compiledWebGLShaderStages[i];
+        const isLast = i === compiledWebGLShaderStages.length - 1;
+        const nextIsPing = sourceTex === stageTargets.sceneTexture || sourceTex === stageTargets.pongTexture;
+        const targetFramebuffer = isLast
+          ? null
+          : (nextIsPing ? stageTargets.pingFramebuffer : stageTargets.pongFramebuffer);
+        const nextTexture = nextIsPing ? stageTargets.pingTexture : stageTargets.pongTexture;
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, targetFramebuffer);
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.useProgram(stage.program);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, sourceTex);
+        gl.uniform1i(stage.sourceLoc, 0);
+        gl.uniform2f(stage.resolutionLoc, canvas.width, canvas.height);
+        gl.uniform1f(stage.timeLoc, nowSec);
+        gl.uniform4f(
+          stage.params0Loc,
+          stage.params[0] ?? 0,
+          stage.params[1] ?? 0,
+          stage.params[2] ?? 0,
+          stage.params[3] ?? 0,
+        );
+        gl.uniform4f(
+          stage.params1Loc,
+          stage.params[4] ?? 0,
+          stage.params[5] ?? 0,
+          stage.params[6] ?? 0,
+          stage.params[7] ?? 0,
+        );
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        sourceTex = nextTexture;
+      }
+      gl.bindVertexArray(null);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    } else {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+
     const kittyPlacements = wasm && wasmHandle ? wasm.getKittyPlacements(wasmHandle) : [];
     drawKittyOverlay(kittyPlacements, cellW, cellH);
   }
@@ -7410,12 +8093,16 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
         callbacks?.onBackend?.("webgpu");
         log("webgpu ready");
         activeState = gpuState;
+        clearWebGLShaderStages();
+        destroyWebGLStageTargets();
         // Reconfigure context for current canvas size
         gpuState.context.configure({
           device: gpuState.device,
           format: gpuState.format,
           alphaMode: "opaque",
         });
+        rebuildWebGPUShaderStages(gpuState);
+        shaderStagesDirty = false;
         updateGrid();
         needsRender = true;
         console.log(
@@ -7440,6 +8127,10 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
         callbacks?.onBackend?.("webgl2");
         log("webgl2 ready");
         activeState = glState;
+        clearWebGPUShaderStages();
+        destroyWebGPUStageTargets();
+        rebuildWebGLShaderStages(glState);
+        shaderStagesDirty = false;
         updateGrid();
         needsRender = true;
         console.log(
@@ -7477,6 +8168,15 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
         // ignore wasm destroy errors
       }
       wasmHandle = 0;
+    }
+    clearWebGPUShaderStages();
+    destroyWebGPUStageTargets();
+    if (activeState && "gl" in activeState) {
+      clearWebGLShaderStages(activeState);
+      destroyWebGLStageTargets(activeState);
+    } else {
+      clearWebGLShaderStages();
+      destroyWebGLStageTargets();
     }
     for (const cleanup of cleanupCanvasFns) cleanup();
     cleanupCanvasFns.length = 0;
@@ -7544,5 +8244,7 @@ function fontEntryHasBoldStyle(entry: FontEntry | undefined | null) {
     blur,
     updateSize,
     getBackend: () => backend,
+    setShaderStages,
+    getShaderStages,
   };
 }

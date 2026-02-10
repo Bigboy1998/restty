@@ -8,7 +8,13 @@ import {
   type ResttyPaneAppOptionsInput,
 } from "./pane-app-manager";
 import type { ResttyPaneManager, ResttyPaneSplitDirection } from "./panes";
-import type { ResttyFontSource } from "./types";
+import type { ResttyFontSource, ResttyShaderStage } from "./types";
+import {
+  cloneShaderStages,
+  normalizeShaderStage,
+  normalizeShaderStages,
+  sortShaderStages,
+} from "./shader-stages";
 
 /**
  * Top-level configuration for creating a Restty instance.
@@ -18,6 +24,8 @@ export type ResttyOptions = Omit<CreateResttyAppPaneManagerOptions, "appOptions"
   appOptions?: CreateResttyAppPaneManagerOptions["appOptions"];
   /** Font sources applied to every pane. */
   fontSources?: ResttyPaneAppOptionsInput["fontSources"];
+  /** Global shader stages synchronized to all panes. */
+  shaderStages?: ResttyShaderStage[];
   /** Global handler for desktop notifications emitted by any pane. */
   onDesktopNotification?: (notification: DesktopNotification & { paneId: number }) => void;
   /** Whether to create the first pane automatically (default true). */
@@ -52,6 +60,7 @@ export type ResttyPluginInfo = {
   outputInterceptors: number;
   lifecycleHooks: number;
   renderHooks: number;
+  renderStages: number;
 };
 
 /** Declarative plugin manifest entry for registry-based loading. */
@@ -174,6 +183,13 @@ export type ResttyInterceptorOptions = {
   priority?: number;
 };
 
+export type ResttyRenderStageHandle = {
+  id: string;
+  setUniforms: (uniforms: number[]) => void;
+  setEnabled: (value: boolean) => void;
+  dispose: () => void;
+};
+
 /** Context object provided to each plugin on activation. */
 export type ResttyPluginContext = {
   restty: Restty;
@@ -202,6 +218,7 @@ export type ResttyPluginContext = {
     hook: ResttyRenderHook,
     options?: ResttyInterceptorOptions,
   ) => ResttyPluginDisposable;
+  addRenderStage: (stage: ResttyShaderStage) => ResttyRenderStageHandle;
 };
 
 /** Plugin contract for extending Restty behavior. */
@@ -221,7 +238,8 @@ type ResttyPluginRuntimeDisposerKind =
   | "input-interceptor"
   | "output-interceptor"
   | "lifecycle-hook"
-  | "render-hook";
+  | "render-hook"
+  | "render-stage";
 type ResttyPluginRuntimeDisposer = {
   kind: ResttyPluginRuntimeDisposerKind;
   active: boolean;
@@ -254,6 +272,13 @@ type ResttyRegisteredInterceptor<T extends (payload: unknown) => string | null |
   interceptor: T;
 };
 
+type ResttyManagedShaderStage = {
+  id: string;
+  stage: ResttyShaderStage;
+  order: number;
+  ownerPluginId: string | null;
+};
+
 /**
  * Public API surface exposed by each pane handle.
  */
@@ -281,6 +306,8 @@ export type ResttyPaneApi = {
   blur: () => void;
   updateSize: (force?: boolean) => void;
   getBackend: () => string;
+  setShaderStages: (stages: ResttyShaderStage[]) => void;
+  getShaderStages: () => ResttyShaderStage[];
   getRawPane: () => ResttyManagedAppPane;
 };
 
@@ -388,6 +415,14 @@ export class ResttyPaneHandle implements ResttyPaneApi {
     return this.resolvePane().app.getBackend();
   }
 
+  setShaderStages(stages: ResttyShaderStage[]): void {
+    this.resolvePane().app.setShaderStages(stages);
+  }
+
+  getShaderStages(): ResttyShaderStage[] {
+    return this.resolvePane().app.getShaderStages();
+  }
+
   getRawPane(): ResttyManagedAppPane {
     return this.resolvePane();
   }
@@ -401,6 +436,9 @@ export class ResttyPaneHandle implements ResttyPaneApi {
 export class Restty {
   readonly paneManager: ResttyPaneManager<ResttyManagedAppPane>;
   private fontSources: ResttyFontSource[] | undefined;
+  private readonly paneBaseShaderStages = new Map<number, ResttyShaderStage[]>();
+  private readonly globalShaderStages = new Map<string, ResttyManagedShaderStage>();
+  private nextShaderStageOrder = 1;
   private readonly pluginListeners = new Map<
     keyof ResttyPluginEvents,
     Set<(payload: unknown) => void>
@@ -421,6 +459,7 @@ export class Restty {
       createInitialPane = true,
       appOptions,
       fontSources,
+      shaderStages,
       onDesktopNotification,
       onPaneCreated,
       onPaneClosed,
@@ -430,15 +469,30 @@ export class Restty {
       ...paneManagerOptions
     } = options;
     this.fontSources = fontSources ? [...fontSources] : undefined;
+    if (shaderStages?.length) {
+      const normalized = sortShaderStages(normalizeShaderStages(shaderStages));
+      for (let i = 0; i < normalized.length; i += 1) {
+        const stage = normalized[i];
+        this.globalShaderStages.set(stage.id, {
+          id: stage.id,
+          stage,
+          order: this.nextShaderStageOrder++,
+          ownerPluginId: null,
+        });
+      }
+    }
     const mergedAppOptions: CreateResttyAppPaneManagerOptions["appOptions"] = (context) => {
       const resolved = typeof appOptions === "function" ? appOptions(context) : (appOptions ?? {});
       const resolvedBeforeInput = resolved.beforeInput;
       const resolvedBeforeRenderOutput = resolved.beforeRenderOutput;
       const resolvedCallbacks = resolved.callbacks;
+      const paneBaseStages = this.normalizePaneShaderStages(resolved.shaderStages, context.id);
+      this.paneBaseShaderStages.set(context.id, paneBaseStages);
 
       return {
         ...resolved,
         ...(this.fontSources ? { fontSources: this.fontSources } : {}),
+        shaderStages: this.buildMergedShaderStages(paneBaseStages),
         callbacks:
           onDesktopNotification || resolvedCallbacks?.onDesktopNotification
             ? {
@@ -492,10 +546,12 @@ export class Restty {
       ...paneManagerOptions,
       appOptions: mergedAppOptions,
       onPaneCreated: (pane) => {
+        this.syncPaneShaderStages(pane.id);
         this.emitPluginEvent("pane:created", { paneId: pane.id });
         onPaneCreated?.(pane);
       },
       onPaneClosed: (pane) => {
+        this.paneBaseShaderStages.delete(pane.id);
         this.emitPluginEvent("pane:closed", { paneId: pane.id });
         onPaneClosed?.(pane);
       },
@@ -576,6 +632,40 @@ export class Restty {
       updates[i] = panes[i].app.setFontSources(this.fontSources ?? []);
     }
     await Promise.all(updates);
+  }
+
+  setShaderStages(stages: ResttyShaderStage[]): void {
+    this.globalShaderStages.clear();
+    const normalized = sortShaderStages(normalizeShaderStages(stages ?? []));
+    for (let i = 0; i < normalized.length; i += 1) {
+      const stage = normalized[i];
+      this.globalShaderStages.set(stage.id, {
+        id: stage.id,
+        stage,
+        order: this.nextShaderStageOrder++,
+        ownerPluginId: null,
+      });
+    }
+    this.syncPaneShaderStages();
+  }
+
+  getShaderStages(): ResttyShaderStage[] {
+    return cloneShaderStages(this.listGlobalShaderStages().map((entry) => entry.stage));
+  }
+
+  addShaderStage(stage: ResttyShaderStage): ResttyRenderStageHandle {
+    const normalized = normalizeShaderStage(stage);
+    return this.addGlobalShaderStage(normalized, null);
+  }
+
+  removeShaderStage(id: string): boolean {
+    const stageId = id?.trim?.() ?? "";
+    if (!stageId) return false;
+    const removed = this.globalShaderStages.delete(stageId);
+    if (removed) {
+      this.syncPaneShaderStages();
+    }
+    return removed;
   }
 
   createInitialPane(options?: { focus?: boolean }): ResttyManagedAppPane {
@@ -862,6 +952,8 @@ export class Restty {
     for (let i = 0; i < pluginIds.length; i += 1) {
       this.unuse(pluginIds[i]);
     }
+    this.globalShaderStages.clear();
+    this.paneBaseShaderStages.clear();
     this.paneManager.destroy();
   }
 
@@ -1020,6 +1112,99 @@ export class Restty {
     return this.requireActivePaneHandle().getBackend();
   }
 
+  private addGlobalShaderStage(
+    stage: ResttyShaderStage,
+    ownerPluginId: string | null,
+  ): ResttyRenderStageHandle {
+    const normalized = normalizeShaderStage(stage);
+    this.globalShaderStages.set(normalized.id, {
+      id: normalized.id,
+      stage: normalized,
+      order: this.nextShaderStageOrder++,
+      ownerPluginId,
+    });
+    this.syncPaneShaderStages();
+    return {
+      id: normalized.id,
+      setUniforms: (uniforms: number[]) => {
+        const current = this.globalShaderStages.get(normalized.id);
+        if (!current) return;
+        const next = normalizeShaderStage({
+          ...current.stage,
+          uniforms,
+        });
+        this.globalShaderStages.set(normalized.id, {
+          ...current,
+          stage: next,
+        });
+        this.syncPaneShaderStages();
+      },
+      setEnabled: (value: boolean) => {
+        const current = this.globalShaderStages.get(normalized.id);
+        if (!current) return;
+        const next = normalizeShaderStage({
+          ...current.stage,
+          enabled: Boolean(value),
+        });
+        this.globalShaderStages.set(normalized.id, {
+          ...current,
+          stage: next,
+        });
+        this.syncPaneShaderStages();
+      },
+      dispose: () => {
+        this.removeShaderStage(normalized.id);
+      },
+    };
+  }
+
+  private listGlobalShaderStages(): ResttyManagedShaderStage[] {
+    return Array.from(this.globalShaderStages.values()).sort((a, b) => a.order - b.order);
+  }
+
+  private normalizePaneShaderStages(
+    stages: ResttyShaderStage[] | undefined,
+    paneId: number,
+  ): ResttyShaderStage[] {
+    if (!stages?.length) return [];
+    try {
+      return sortShaderStages(normalizeShaderStages(stages));
+    } catch (error) {
+      console.warn(`[restty shader-stage] invalid pane stage config for pane ${paneId}:`, error);
+      return [];
+    }
+  }
+
+  private buildMergedShaderStages(baseStages: ResttyShaderStage[]): ResttyShaderStage[] {
+    const merged = new Map<string, ResttyShaderStage>();
+    for (let i = 0; i < baseStages.length; i += 1) {
+      const stage = baseStages[i];
+      merged.set(stage.id, stage);
+    }
+    const globals = this.listGlobalShaderStages();
+    for (let i = 0; i < globals.length; i += 1) {
+      const stage = globals[i].stage;
+      if (merged.has(stage.id)) merged.delete(stage.id);
+      merged.set(stage.id, stage);
+    }
+    return sortShaderStages(Array.from(merged.values()));
+  }
+
+  private syncPaneShaderStages(paneId?: number): void {
+    const panes: ResttyManagedAppPane[] = [];
+    if (paneId === undefined) {
+      panes.push(...this.getPanes());
+    } else {
+      const pane = this.getPaneById(paneId);
+      if (pane) panes.push(pane);
+    }
+    for (let i = 0; i < panes.length; i += 1) {
+      const pane = panes[i];
+      const base = this.paneBaseShaderStages.get(pane.id) ?? [];
+      pane.app.setShaderStages(this.buildMergedShaderStages(base));
+    }
+  }
+
   private makePaneHandle(id: number): ResttyPaneHandle {
     return new ResttyPaneHandle(() => this.requirePaneById(id));
   }
@@ -1092,6 +1277,19 @@ export class Restty {
             "render-hook",
             this.addRenderHook(runtime.plugin.id, hook, options),
           ),
+        };
+      },
+      addRenderStage: (stage) => {
+        const rawId = stage?.id?.trim?.() ?? "";
+        if (!rawId) {
+          throw new Error(`Restty plugin ${runtime.plugin.id} render stage id is required`);
+        }
+        const stageId = `${runtime.plugin.id}:${rawId}`;
+        const normalized = normalizeShaderStage({ ...stage, id: stageId });
+        const handle = this.addGlobalShaderStage(normalized, runtime.plugin.id);
+        return {
+          ...handle,
+          dispose: this.attachRuntimeDisposer(runtime, "render-stage", handle.dispose),
         };
       },
     };
@@ -1352,6 +1550,9 @@ export class Restty {
     const renderHooks = runtime
       ? runtime.disposers.filter((entry) => entry.active && entry.kind === "render-hook").length
       : 0;
+    const renderStages = runtime
+      ? runtime.disposers.filter((entry) => entry.active && entry.kind === "render-stage").length
+      : 0;
 
     return {
       id: pluginId,
@@ -1368,6 +1569,7 @@ export class Restty {
       outputInterceptors,
       lifecycleHooks,
       renderHooks,
+      renderStages,
     };
   }
 

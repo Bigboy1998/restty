@@ -154,6 +154,37 @@ export type ResttyAppInputPayload = {
   source: string;
 };
 
+/** Render-stage phase ordering. */
+export type ResttyShaderStageMode = "before-main" | "after-main" | "replace-main";
+/** Target backend(s) for a shader stage. */
+export type ResttyShaderStageBackend = "webgpu" | "webgl2" | "both";
+/** Stage shader source definitions. */
+export type ResttyShaderStageSource = {
+  /**
+   * WGSL source that defines:
+   * fn resttyStage(color: vec4f, uv: vec2f, time: f32, params0: vec4f, params1: vec4f) -> vec4f
+   */
+  wgsl?: string;
+  /**
+   * GLSL source that defines:
+   * vec4 resttyStage(vec4 color, vec2 uv, float time, vec4 params0, vec4 params1)
+   */
+  glsl?: string;
+};
+/** User-defined frame shader stage. */
+export type ResttyShaderStage = {
+  id: string;
+  mode?: ResttyShaderStageMode;
+  backend?: ResttyShaderStageBackend;
+  priority?: number;
+  enabled?: boolean;
+  /** Optional numeric uniforms packed into params0/params1 (up to 8 values). */
+  uniforms?: number[];
+  shader: ResttyShaderStageSource;
+  /** Optional compile/runtime error callback for this stage. */
+  onError?: (message: string) => void;
+};
+
 /**
  * Options for creating a ResttyApp instance.
  */
@@ -232,6 +263,8 @@ export type ResttyAppOptions = {
    * queued for rendering.
    */
   beforeRenderOutput?: (payload: ResttyAppInputPayload) => string | null | void;
+  /** Optional render-stage shader chain. */
+  shaderStages?: ResttyShaderStage[];
 };
 
 /**
@@ -288,4 +321,8 @@ export type ResttyApp = {
   updateSize: (force?: boolean) => void;
   /** Return the name of the active renderer backend. */
   getBackend: () => string;
+  /** Replace the active shader stage list. */
+  setShaderStages: (stages: ResttyShaderStage[]) => void;
+  /** Get the current shader stage list. */
+  getShaderStages: () => ResttyShaderStage[];
 };

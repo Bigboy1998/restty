@@ -26,6 +26,7 @@ export type {
   ResttyRenderHookPayload,
   ResttyOutputInterceptor,
   ResttyOutputInterceptorPayload,
+  ResttyRenderStageHandle,
 } from "./app/restty";
 
 export {
@@ -43,4 +44,8 @@ export type {
   ResttyBufferFontSource,
   ResttyLocalFontSource,
   ResttyFontPreset,
+  ResttyShaderStage,
+  ResttyShaderStageMode,
+  ResttyShaderStageBackend,
+  ResttyShaderStageSource,
 } from "./app/types";

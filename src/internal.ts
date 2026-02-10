@@ -210,4 +210,8 @@ export type {
   ResttyUrlFontSource,
   ResttyBufferFontSource,
   ResttyLocalFontSource,
+  ResttyShaderStage,
+  ResttyShaderStageMode,
+  ResttyShaderStageBackend,
+  ResttyShaderStageSource,
 } from "./app/types";
