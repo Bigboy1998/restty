@@ -50,3 +50,39 @@ test("updateImePosition anchors IME input using rendered cell metrics", () => {
   expect(imeInput.style.left).toBe("300px");
   expect(imeInput.style.top).toBe("300px");
 });
+
+test("updateCanvasCursor uses pointer while hovering link without active selection", () => {
+  const canvas = new FakeCanvas();
+
+  const interaction = createRuntimeInteraction({
+    attachCanvasEvents: false,
+    touchSelectionMode: "off",
+    touchSelectionLongPressMs: 450,
+    touchSelectionMoveThresholdPx: 10,
+    showOverlayScrollbar: false,
+    kittyOverlayDebugEnabled: false,
+    imeInput: null,
+    cleanupCanvasFns: [],
+    getCanvas: () => canvas as unknown as HTMLCanvasElement,
+    getCurrentDpr: () => 2,
+    getGridState: () => ({ cols: 3, rows: 3, cellW: 200, cellH: 200 }),
+    getLastRenderState: () => null,
+    getWasmReady: () => false,
+    getWasm: () => null,
+    getWasmHandle: () => 0,
+    getWasmExports: () => null,
+    updateLinkHover: () => {},
+    markNeedsRender: () => {},
+  });
+
+  interaction.updateCanvasCursor();
+  expect(canvas.style.cursor).toBe("text");
+
+  interaction.linkState.hoverId = 1;
+  interaction.updateCanvasCursor();
+  expect(canvas.style.cursor).toBe("pointer");
+
+  interaction.selectionState.active = true;
+  interaction.updateCanvasCursor();
+  expect(canvas.style.cursor).toBe("text");
+});
