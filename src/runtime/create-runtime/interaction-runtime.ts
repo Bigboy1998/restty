@@ -99,7 +99,8 @@ export function createRuntimeInteraction(
   const updateCanvasCursor = () => {
     const canvas = getCanvas();
     if (!canvas) return;
-    const showPointer = linkState.hoverId !== 0 && !selectionState.active && !selectionState.dragging;
+    const showPointer =
+      linkState.hoverId !== 0 && !selectionState.active && !selectionState.dragging;
     canvas.style.cursor = showPointer ? "pointer" : "text";
   };
 
