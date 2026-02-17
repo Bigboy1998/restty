@@ -8,6 +8,7 @@ import {
 } from "../../selection";
 import type { ResttyWasm, ResttyWasmExports } from "../../wasm";
 import { normalizeNewlines } from "../create-app-io-utils";
+import { resolveMaxScrollbackBytes } from "../max-scrollback";
 import type { ResttyApp, ResttyAppCallbacks, ResttyAppSession } from "../types";
 import type { PtyInputRuntime } from "./pty-input-runtime";
 import type { RuntimeInteraction } from "./interaction-runtime";
@@ -65,17 +66,6 @@ type LifecycleThemeRuntime = {
   getActiveTheme: () => GhosttyTheme | null;
 };
 
-const DEFAULT_MAX_SCROLLBACK = 2000;
-const MAX_SCROLLBACK_U32 = 0xffff_ffff;
-
-function normalizeMaxScrollback(value: number | undefined): number {
-  if (!Number.isFinite(value)) return DEFAULT_MAX_SCROLLBACK;
-  const asInt = Math.trunc(value);
-  if (asInt <= 0) return 0;
-  if (asInt >= MAX_SCROLLBACK_U32) return MAX_SCROLLBACK_U32;
-  return asInt;
-}
-
 type CreateRuntimeAppApiOptions = {
   session: ResttyAppSession;
   ptyTransport: PtyTransport;
@@ -101,6 +91,7 @@ type CreateRuntimeAppApiOptions = {
   runBeforeRenderOutputHook: (text: string, source: string) => string | null;
   getSelectionText: () => string;
   initialPreferredRenderer: PreferredRenderer;
+  maxScrollbackBytes?: number;
   maxScrollback?: number;
   CURSOR_BLINK_MS: number;
   RESIZE_ACTIVE_MS: number;
@@ -190,7 +181,7 @@ export function createRuntimeAppApi(options: CreateRuntimeAppApiOptions): Runtim
     resizeWasActive: false,
     nextBlinkTime: performance.now() + CURSOR_BLINK_MS,
   };
-  const maxScrollback = normalizeMaxScrollback(options.maxScrollback);
+  const maxScrollbackBytes = resolveMaxScrollbackBytes(options);
 
   function updateFps() {
     internalState.frameCount += 1;
@@ -512,7 +503,7 @@ export function createRuntimeAppApi(options: CreateRuntimeAppApiOptions): Runtim
       updateGrid();
       const cols = gridState.cols || 80;
       const rows = gridState.rows || 24;
-      const wasmHandle = instance.create(cols, rows, maxScrollback);
+      const wasmHandle = instance.create(cols, rows, maxScrollbackBytes);
       if (!wasmHandle) {
         throw new Error("restty create failed (restty_create returned 0)");
       }
