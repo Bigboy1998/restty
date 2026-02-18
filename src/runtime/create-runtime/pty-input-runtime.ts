@@ -1,5 +1,5 @@
 import type { InputHandler } from "../../input";
-import type { PtyTransport } from "../../pty";
+import type { PtyResizeMeta, PtyTransport } from "../../pty";
 import type { PtyOutputBufferController } from "../pty-output-buffer";
 import { readPastePayloadFromDataTransfer } from "../clipboard-paste";
 import { formatPasteText } from "./format-utils";
@@ -21,6 +21,7 @@ export type CreatePtyInputRuntimeOptions = {
   onMouseStatus?: ((status: string) => void) | null;
   appendLog: (line: string) => void;
   getGridSize: () => { cols: number; rows: number };
+  getResizeMeta?: () => PtyResizeMeta | null;
   getCursorForCpr: () => CursorPosition;
   sendInput: SendInput;
   runBeforeInputHook: (text: string, source: string) => string | null;
@@ -61,6 +62,7 @@ export function createPtyInputRuntime(options: CreatePtyInputRuntimeOptions): Pt
     onMouseStatus,
     appendLog,
     getGridSize,
+    getResizeMeta,
     getCursorForCpr,
     sendInput,
     runBeforeInputHook,
@@ -147,7 +149,11 @@ export function createPtyInputRuntime(options: CreatePtyInputRuntimeOptions): Pt
             updateMouseStatus();
             const connectedGrid = getGridSize();
             if (connectedGrid.cols && connectedGrid.rows) {
-              ptyTransport.resize(connectedGrid.cols, connectedGrid.rows);
+              ptyTransport.resize(
+                connectedGrid.cols,
+                connectedGrid.rows,
+                getResizeMeta?.() ?? undefined,
+              );
             }
             appendLog("[pty] connected");
           },

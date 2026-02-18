@@ -1,5 +1,8 @@
 import type { KittyPlacement, ResttyWasmExports } from "./types";
 
+const KITTY_PLACEMENT_STRIDE_V1 = 68;
+const KITTY_PLACEMENT_STRIDE_V2 = 76;
+
 export function readKittyPlacements(
   exports: ResttyWasmExports,
   memory: WebAssembly.Memory,
@@ -14,15 +17,18 @@ export function readKittyPlacements(
   if (!ptr) return [];
   const stride = exports.restty_kitty_placement_stride
     ? exports.restty_kitty_placement_stride() >>> 0
-    : 68;
+    : KITTY_PLACEMENT_STRIDE_V1;
   if (!stride) return [];
 
   const view = new DataView(memory.buffer, ptr, count * stride);
   const placements: KittyPlacement[] = new Array(count);
+  const hasPlacementIdentity = stride >= KITTY_PLACEMENT_STRIDE_V2;
   for (let i = 0; i < count; i += 1) {
     const base = i * stride;
     placements[i] = {
       imageId: view.getUint32(base + 0, true),
+      placementId: hasPlacementIdentity ? view.getUint32(base + 68, true) : 0,
+      placementExternal: hasPlacementIdentity ? view.getUint8(base + 72) !== 0 : false,
       imageFormat: view.getUint8(base + 4),
       imageWidth: view.getUint32(base + 8, true),
       imageHeight: view.getUint32(base + 12, true),

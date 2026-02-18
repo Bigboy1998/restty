@@ -104,6 +104,10 @@ const VtHandlerFn = @TypeOf(ghostty.Terminal.vtHandler);
 const ReadonlyHandler = @typeInfo(VtHandlerFn).@"fn".return_type.?;
 const kitty_graphics_enabled = @hasDecl(ghostty.kitty.graphics, "Command");
 const max_output_bytes: usize = 1024 * 1024;
+const max_apc_debug_bytes: usize = 16 * 1024;
+const max_apc_error_logs: u8 = 24;
+
+const log = std.log.scoped(.restty_apc);
 
 const KittyPlacementAbi = extern struct {
     image_id: u32,
@@ -124,6 +128,9 @@ const KittyPlacementAbi = extern struct {
     source_y: u32,
     source_width: u32,
     source_height: u32,
+    placement_id: u32,
+    placement_external: u8,
+    _pad1: [3]u8 = .{ 0, 0, 0 },
 };
 
 const StreamHandler = struct {
@@ -132,6 +139,9 @@ const StreamHandler = struct {
     readonly: ReadonlyHandler,
     output: *std.ArrayListUnmanaged(u8),
     apc: ghostty.apc.Handler = .{},
+    apc_debug: std.ArrayListUnmanaged(u8) = .{},
+    apc_debug_truncated: bool = false,
+    apc_error_logs_remaining: u8 = max_apc_error_logs,
 
     pub fn init(
         alloc: Allocator,
@@ -144,12 +154,194 @@ const StreamHandler = struct {
             .readonly = .init(term),
             .output = output,
             .apc = .{},
+            .apc_debug = .{},
+            .apc_debug_truncated = false,
+            .apc_error_logs_remaining = max_apc_error_logs,
         };
     }
 
     pub fn deinit(self: *StreamHandler) void {
         self.readonly.deinit();
         self.apc.deinit();
+        self.apc_debug.deinit(self.alloc);
+    }
+
+    fn apcDebugReset(self: *StreamHandler) void {
+        self.apc_debug.clearRetainingCapacity();
+        self.apc_debug_truncated = false;
+    }
+
+    fn apcDebugCapture(self: *StreamHandler, byte: u8) void {
+        if (self.apc_debug_truncated) return;
+        if (self.apc_debug.items.len >= max_apc_debug_bytes) {
+            self.apc_debug_truncated = true;
+            return;
+        }
+        self.apc_debug.append(self.alloc, byte) catch {
+            self.apc_debug_truncated = true;
+        };
+    }
+
+    fn isBase64Byte(byte: u8) bool {
+        return (byte >= 'A' and byte <= 'Z') or
+            (byte >= 'a' and byte <= 'z') or
+            (byte >= '0' and byte <= '9') or
+            byte == '+' or
+            byte == '/' or
+            byte == '=';
+    }
+
+    fn logApcFailure(self: *StreamHandler) void {
+        if (self.apc_error_logs_remaining == 0) return;
+        const raw = self.apc_debug.items;
+        if (raw.len == 0) return;
+
+        // Only inspect Kitty APC packets.
+        if (raw[0] != 'G') return;
+
+        self.apc_error_logs_remaining -|= 1;
+
+        const kitty = raw[1..];
+        const sep_opt = std.mem.indexOfScalar(u8, kitty, ';');
+        if (sep_opt == null) {
+            const preview_len = @min(kitty.len, 64);
+            log.warn(
+                "kitty APC parse failed before payload control={s} bytes={d} truncated={} preview_hex={x}",
+                .{
+                    kitty[0..preview_len],
+                    kitty.len,
+                    self.apc_debug_truncated,
+                    kitty[0..preview_len],
+                },
+            );
+            return;
+        }
+
+        const sep = sep_opt.?;
+        const control = kitty[0..sep];
+        const payload = kitty[sep + 1 ..];
+
+        var invalid_idx: ?usize = null;
+        var invalid_byte: u8 = 0;
+        for (payload, 0..) |byte, idx| {
+            if (!isBase64Byte(byte)) {
+                invalid_idx = idx;
+                invalid_byte = byte;
+                break;
+            }
+        }
+
+        if (invalid_idx) |idx| {
+            const win_start = idx -| 12;
+            const win_end = @min(payload.len, idx + 13);
+            log.warn(
+                "kitty APC invalid payload byte control={s} payload_len={d} invalid=0x{x:0>2} at={d} around_hex={x} truncated={}",
+                .{
+                    control,
+                    payload.len,
+                    invalid_byte,
+                    idx,
+                    payload[win_start..win_end],
+                    self.apc_debug_truncated,
+                },
+            );
+            return;
+        }
+
+        const preview_len = @min(payload.len, 64);
+        log.warn(
+            "kitty APC parse failed control={s} payload_len={d} payload_mod4={d} truncated={} payload_preview_hex={x}",
+            .{
+                control,
+                payload.len,
+                payload.len % 4,
+                self.apc_debug_truncated,
+                payload[0..preview_len],
+            },
+        );
+    }
+
+    fn logKittyResponseError(
+        self: *StreamHandler,
+        cmd: *const ghostty.kitty.graphics.Command,
+        resp: ghostty.kitty.graphics.Response,
+    ) void {
+        const action: []const u8 = switch (cmd.control) {
+            .query => "q",
+            .transmit => "t",
+            .transmit_and_display => "T",
+            .display => "p",
+            .delete => "d",
+            .transmit_animation_frame => "f",
+            .control_animation => "a",
+            .compose_animation => "c",
+        };
+
+        log.warn(
+            "kitty graphics command failed action={s} quiet={} resp={s} resp_i={d} resp_I={d} resp_p={d} data_len={d}",
+            .{
+                action,
+                cmd.quiet,
+                resp.message,
+                resp.id,
+                resp.image_number,
+                resp.placement_id,
+                cmd.data.len,
+            },
+        );
+
+        if (cmd.transmission()) |t| {
+            log.warn(
+                "kitty tx fields i={d} I={d} p={d} format={} medium={} s={d} v={d} S={d} O={d} m={} compression={}",
+                .{
+                    t.image_id,
+                    t.image_number,
+                    t.placement_id,
+                    t.format,
+                    t.medium,
+                    t.width,
+                    t.height,
+                    t.size,
+                    t.offset,
+                    t.more_chunks,
+                    t.compression,
+                },
+            );
+        }
+
+        if (cmd.display()) |d| {
+            log.warn(
+                "kitty display fields i={d} I={d} p={d} x={d} y={d} w={d} h={d} X={d} Y={d} c={d} r={d} C={} U={} z={d}",
+                .{
+                    d.image_id,
+                    d.image_number,
+                    d.placement_id,
+                    d.x,
+                    d.y,
+                    d.width,
+                    d.height,
+                    d.x_offset,
+                    d.y_offset,
+                    d.columns,
+                    d.rows,
+                    d.cursor_movement,
+                    d.virtual_placement,
+                    d.z,
+                },
+            );
+        }
+
+        if (self.apc_debug.items.len > 0) {
+            const preview_len = @min(self.apc_debug.items.len, 96);
+            log.warn(
+                "kitty APC preview_hex={x} bytes={d} truncated={}",
+                .{
+                    self.apc_debug.items[0..preview_len],
+                    self.apc_debug.items.len,
+                    self.apc_debug_truncated,
+                },
+            );
+        }
     }
 
     fn appendOutput(self: *StreamHandler, bytes: []const u8) !void {
@@ -225,7 +417,12 @@ const StreamHandler = struct {
     }
 
     fn apcEnd(self: *StreamHandler) !void {
-        var cmd = self.apc.end() orelse return;
+        var cmd = self.apc.end() orelse {
+            self.logApcFailure();
+            self.apcDebugReset();
+            return;
+        };
+        defer self.apcDebugReset();
         defer cmd.deinit(self.alloc);
 
         if (comptime !kitty_graphics_enabled) return;
@@ -233,6 +430,9 @@ const StreamHandler = struct {
         switch (cmd) {
             .kitty => |*kitty_cmd| {
                 if (self.term.kittyGraphics(self.alloc, kitty_cmd)) |resp| {
+                    if (!resp.ok()) {
+                        self.logKittyResponseError(kitty_cmd, resp);
+                    }
                     var buf: [1024]u8 = undefined;
                     var writer: std.Io.Writer = .fixed(&buf);
                     try resp.encode(&writer);
@@ -251,8 +451,14 @@ const StreamHandler = struct {
             .device_attributes => try self.deviceAttributes(value),
             .device_status => try self.deviceStatusReport(value.request),
             .kitty_keyboard_query => try self.queryKittyKeyboard(),
-            .apc_start => self.apc.start(),
-            .apc_put => self.apc.feed(self.alloc, value),
+            .apc_start => {
+                self.apc.start();
+                self.apcDebugReset();
+            },
+            .apc_put => {
+                self.apcDebugCapture(value);
+                self.apc.feed(self.alloc, value);
+            },
             .apc_end => try self.apcEnd(),
             else => try self.readonly.vt(action, value),
         }
@@ -350,6 +556,8 @@ fn kittyFormatToAbi(format: anytype) u8 {
 fn appendKittyPlacement(
     h: *Restty,
     image: ghostty.kitty.graphics.Image,
+    placement_id: u32,
+    placement_external: u8,
     x: i32,
     y: i32,
     z: i32,
@@ -383,6 +591,8 @@ fn appendKittyPlacement(
         .source_y = source_y,
         .source_width = source_width,
         .source_height = source_height,
+        .placement_id = placement_id,
+        .placement_external = placement_external,
     });
 }
 
@@ -436,6 +646,8 @@ fn collectKittyPlacements(h: *Restty) !void {
         try appendKittyPlacement(
             h,
             image,
+            entry.key_ptr.placement_id.id,
+            @intFromBool(entry.key_ptr.placement_id.tag == .external),
             @intCast(rect.top_left.x),
             y_pos,
             p.z,
@@ -464,6 +676,8 @@ fn collectKittyPlacements(h: *Restty) !void {
         try appendKittyPlacement(
             h,
             image,
+            virtual_p.placement_id,
+            if (virtual_p.placement_id == 0) 0 else 1,
             @intCast(rp.top_left.x),
             @intCast(viewport.viewport.y),
             -1,
@@ -485,7 +699,14 @@ fn collectKittyPlacements(h: *Restty) !void {
         struct {
             fn lessThan(ctx: void, lhs: KittyPlacementAbi, rhs: KittyPlacementAbi) bool {
                 _ = ctx;
-                return lhs.z < rhs.z or (lhs.z == rhs.z and lhs.image_id < rhs.image_id);
+                if (lhs.z != rhs.z) return lhs.z < rhs.z;
+                if (lhs.image_id != rhs.image_id) return lhs.image_id < rhs.image_id;
+                if (lhs.placement_external != rhs.placement_external) {
+                    return lhs.placement_external < rhs.placement_external;
+                }
+                if (lhs.placement_id != rhs.placement_id) return lhs.placement_id < rhs.placement_id;
+                if (lhs.y != rhs.y) return lhs.y < rhs.y;
+                return lhs.x < rhs.x;
             }
         }.lessThan,
     );
@@ -735,7 +956,7 @@ pub export fn restty_render_update(handle: ?*Restty) u32 {
             else
                 false;
 
-            h.buffers.codepoints[idx] = if (is_kitty_placeholder) 32 else @intCast(raw_codepoint);
+            h.buffers.codepoints[idx] = @intCast(raw_codepoint);
             h.buffers.content_tags[idx] = @intFromEnum(raw.content_tag);
             h.buffers.wide[idx] = @intFromEnum(raw.wide);
 

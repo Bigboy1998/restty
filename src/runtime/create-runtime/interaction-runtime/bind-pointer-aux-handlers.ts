@@ -103,7 +103,7 @@ export function createPointerAuxHandlers(
   };
 
   const onContextMenu = (event: MouseEvent) => {
-    if (inputHandler.isMouseActive()) event.preventDefault();
+    if (shouldRoutePointerToAppMouse(event.shiftKey)) event.preventDefault();
   };
 
   const onPointerLeave = () => {

@@ -21,9 +21,6 @@ export function createRuntimeFontRuntimeHelpers(options: CreateRuntimeFontRuntim
     getWasmHandle,
     ptyTransport,
     setNeedsRender,
-    resizeState,
-    resizeActiveMs,
-    resizeCommitDebounceMs,
     getFontHinting,
     getFontHintTarget,
     fontScaleOverrides,
@@ -69,9 +66,6 @@ export function createRuntimeFontRuntimeHelpers(options: CreateRuntimeFontRuntim
     getWasmHandle,
     ptyTransport,
     setNeedsRender,
-    resizeState,
-    resizeActiveMs,
-    resizeCommitDebounceMs,
     shapeClusterWithFont: textHelpers.shapeClusterWithFont,
   });
 

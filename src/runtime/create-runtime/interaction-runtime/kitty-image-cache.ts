@@ -6,11 +6,12 @@ const KITTY_FMT_RGB = 3;
 const KITTY_FMT_RGBA = 4;
 const KITTY_FMT_PNG = 100;
 
-type KittyDecodedImage = {
+export type KittyDecodedImage = {
   key: string;
   width: number;
   height: number;
   source: CanvasImageSource;
+  pixels?: Uint8Array;
 };
 
 export type KittyImageCache = {
@@ -28,7 +29,9 @@ export function createKittyImageCache(options: CreateKittyImageCacheOptions): Ki
   const { getWasm, markNeedsRender } = options;
 
   const kittyImageCache = new Map<number, KittyDecodedImage>();
+  const kittyImageKeyById = new Map<number, string>();
   const kittyDecodePending = new Set<string>();
+  const kittyDecodeWarnings = new Set<string>();
 
   const releaseKittyImage = (entry: KittyDecodedImage | undefined) => {
     const source = entry?.source as ImageBitmap | undefined;
@@ -96,7 +99,29 @@ export function createKittyImageCache(options: CreateKittyImageCacheOptions): Ki
     const ctx = surface.getContext("2d");
     if (!ctx) return null;
     ctx.putImageData(new ImageData(out, width, height), 0, 0);
-    return { key, width, height, source: surface };
+    return {
+      key,
+      width,
+      height,
+      source: surface,
+      pixels: new Uint8Array(out.buffer, out.byteOffset, out.byteLength),
+    };
+  };
+
+  const extractPngPixels = (bitmap: ImageBitmap): Uint8Array | undefined => {
+    if (typeof document === "undefined") return undefined;
+    const surface = document.createElement("canvas");
+    surface.width = bitmap.width;
+    surface.height = bitmap.height;
+    const ctx = surface.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return undefined;
+    try {
+      ctx.drawImage(bitmap, 0, 0);
+      const rgba = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+      return new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength);
+    } catch {
+      return undefined;
+    }
   };
 
   const resolveKittyImage = (placement: KittyPlacement): KittyDecodedImage | null => {
@@ -113,6 +138,7 @@ export function createKittyImageCache(options: CreateKittyImageCacheOptions): Ki
       ptr,
       len,
     ].join(":");
+    kittyImageKeyById.set(placement.imageId, key);
 
     const cached = kittyImageCache.get(placement.imageId);
     if (cached?.key === key) return cached;
@@ -128,6 +154,10 @@ export function createKittyImageCache(options: CreateKittyImageCacheOptions): Ki
       createImageBitmap(new Blob([copy], { type: "image/png" }))
         .then((bitmap) => {
           kittyDecodePending.delete(key);
+          if (kittyImageKeyById.get(placement.imageId) !== key) {
+            bitmap.close();
+            return;
+          }
           const current = kittyImageCache.get(placement.imageId);
           if (current && current.key !== key) releaseKittyImage(current);
           kittyImageCache.set(placement.imageId, {
@@ -135,11 +165,20 @@ export function createKittyImageCache(options: CreateKittyImageCacheOptions): Ki
             width: bitmap.width,
             height: bitmap.height,
             source: bitmap,
+            pixels: extractPngPixels(bitmap),
           });
           markNeedsRender();
         })
-        .catch(() => {
+        .catch((error) => {
           kittyDecodePending.delete(key);
+          if (!kittyDecodeWarnings.has(key)) {
+            kittyDecodeWarnings.add(key);
+            console.warn("[kitty] image decode failed", {
+              imageId: placement.imageId,
+              key,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
         });
       return null;
     }
@@ -157,6 +196,7 @@ export function createKittyImageCache(options: CreateKittyImageCacheOptions): Ki
       if (activeImageIds.has(imageId)) continue;
       releaseKittyImage(entry);
       kittyImageCache.delete(imageId);
+      kittyImageKeyById.delete(imageId);
       cacheDirty = true;
     }
     return cacheDirty;
@@ -167,6 +207,7 @@ export function createKittyImageCache(options: CreateKittyImageCacheOptions): Ki
       releaseKittyImage(entry);
     }
     kittyImageCache.clear();
+    kittyImageKeyById.clear();
     kittyDecodePending.clear();
   };
 

@@ -21,13 +21,59 @@ function findKittyTerminator(data: string, from: number): KittyTerminator | null
   return { index: st, len: 2 };
 }
 
-function rewriteOneKittyCommand(body: string, readFile: KittyMediaReadFile): string {
-  const sep = body.indexOf(";");
-  if (sep < 0) return body;
+function isValidKittyControlValue(value: string): boolean {
+  if (!value) return false;
+  if (value.length === 1) return true;
+  return /^-?\d+$/.test(value);
+}
 
-  const control = body.slice(0, sep);
+function sanitizeKittyControl(control: string): string {
+  if (!control) return "";
+  const parts = control.split(",");
+  const sanitized: string[] = [];
+  for (const part of parts) {
+    if (!part) continue;
+    const eq = part.indexOf("=");
+    if (eq <= 0) continue;
+    const key = part.slice(0, eq);
+    const value = part.slice(eq + 1);
+    if (!isValidKittyControlValue(value)) continue;
+    const next = `${key}=${value}`;
+    sanitized.push(next);
+  }
+
+  return sanitized.join(",");
+}
+
+function isLikelyKittyResponse(control: string): boolean {
+  if (!control) return false;
+  const parts = control.split(",");
+  if (!parts.length) return false;
+  for (const part of parts) {
+    if (!part) continue;
+    const eq = part.indexOf("=");
+    if (eq <= 0) return false;
+    const key = part.slice(0, eq);
+    if (key !== "i" && key !== "I" && key !== "p") return false;
+  }
+  return true;
+}
+
+function rewriteOneKittyCommand(
+  body: string,
+  _state: KittyMediaRewriteState,
+  readFile: KittyMediaReadFile,
+): string | null {
+  const sep = body.indexOf(";");
+  if (sep < 0) return sanitizeKittyControl(body);
+
+  const control = sanitizeKittyControl(body.slice(0, sep));
   const payload = body.slice(sep + 1);
-  if (!control || !payload) return body;
+
+  // Kitty response packets (ESC_G...;OK/ERR ESC\) can be echoed by PTYs.
+  // They are terminal->app traffic and should never be parsed as commands.
+  if (isLikelyKittyResponse(control)) return null;
+  if (!payload) return `${control};`;
 
   const parts = control.split(",");
   let medium: string | null = null;
@@ -43,16 +89,20 @@ function rewriteOneKittyCommand(body: string, readFile: KittyMediaReadFile): str
   }
 
   // Only local file or temp file media need host filesystem access.
-  if (medium !== "f" && medium !== "t") return body;
+  if (medium !== "f" && medium !== "t") {
+    return control ? `${control};${payload}` : `;${payload}`;
+  }
 
   const path = decodeBase64Text(payload);
-  if (!path || path.includes("\0")) return body;
+  if (!path || path.includes("\0")) {
+    return control ? `${control};${payload}` : `;${payload}`;
+  }
 
   let bytes: Uint8Array;
   try {
     bytes = readFile(path);
   } catch {
-    return body;
+    return control ? `${control};${payload}` : `;${payload}`;
   }
 
   const nextParts = parts.map((part) => {
@@ -68,7 +118,7 @@ function rewriteOneKittyCommand(body: string, readFile: KittyMediaReadFile): str
   try {
     return `${nextParts.join(",")};${encodeBase64Bytes(bytes)}`;
   } catch {
-    return body;
+    return control ? `${control};${payload}` : `;${payload}`;
   }
 }
 
@@ -98,10 +148,12 @@ export function rewriteKittyFileMediaToDirect(
     }
 
     const body = input.slice(start + 3, terminator.index);
-    const rewritten = rewriteOneKittyCommand(body, readFile);
-    out += "\x1b_G";
-    out += rewritten;
-    out += terminator.len === 2 ? "\x1b\\" : "\x07";
+    const rewritten = rewriteOneKittyCommand(body, state, readFile);
+    if (rewritten !== null) {
+      out += "\x1b_G";
+      out += rewritten;
+      out += terminator.len === 2 ? "\x1b\\" : "\x07";
+    }
 
     i = terminator.index + terminator.len;
   }

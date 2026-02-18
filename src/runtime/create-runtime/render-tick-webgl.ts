@@ -12,8 +12,4 @@ export function tickWebGL(deps: WebGLTickDeps, state: WebGLState) {
   populateWebGLSceneData(ctx);
   populateWebGLOverlays(ctx);
   renderWebGLGlyphPipeline(ctx);
-
-  const kittyPlacements =
-    deps.wasm && deps.wasmHandle ? deps.wasm.getKittyPlacements(deps.wasmHandle) : [];
-  deps.drawKittyOverlay(kittyPlacements, ctx.cellW, ctx.cellH);
 }

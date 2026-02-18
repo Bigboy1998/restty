@@ -4,6 +4,7 @@ import type {
   PtyConnectOptions,
   PtyLifecycleState,
   PtyMessage,
+  PtyResizeMeta,
   PtyServerMessage,
   PtyTransport,
 } from "./types";
@@ -188,9 +189,20 @@ export function sendPtyInput(state: PtyConnectionState, data: string): boolean {
 }
 
 /** Send a resize notification to the PTY server. Returns false if the socket is not open. */
-export function sendPtyResize(state: PtyConnectionState, cols: number, rows: number): boolean {
+export function sendPtyResize(
+  state: PtyConnectionState,
+  cols: number,
+  rows: number,
+  meta?: PtyResizeMeta,
+): boolean {
   if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return false;
   const message: PtyMessage = { type: "resize", cols, rows };
+  if (meta) {
+    if (Number.isFinite(meta.widthPx)) message.widthPx = Math.max(0, Number(meta.widthPx));
+    if (Number.isFinite(meta.heightPx)) message.heightPx = Math.max(0, Number(meta.heightPx));
+    if (Number.isFinite(meta.cellW)) message.cellW = Math.max(0, Number(meta.cellW));
+    if (Number.isFinite(meta.cellH)) message.cellH = Math.max(0, Number(meta.cellH));
+  }
   state.socket.send(JSON.stringify(message));
   return true;
 }
@@ -245,8 +257,8 @@ export function createWebSocketPtyTransport(
     sendInput: (data: string) => {
       return sendPtyInput(state, data);
     },
-    resize: (cols: number, rows: number) => {
-      return sendPtyResize(state, cols, rows);
+    resize: (cols: number, rows: number, meta?: PtyResizeMeta) => {
+      return sendPtyResize(state, cols, rows, meta);
     },
     isConnected: () => {
       return isPtyConnected(state);

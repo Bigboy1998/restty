@@ -19,6 +19,9 @@ test("kitty graphics transmit+display (rgb) yields drawable placement", async ()
   expect(placements.length).toBeGreaterThan(0);
   const p = placements[placements.length - 1]!;
   expect(p.imageFormat).toBe(3);
+  expect(typeof p.placementId).toBe("number");
+  expect(p.placementId).toBeGreaterThanOrEqual(0);
+  expect(p.placementExternal).toBe(false);
   expect(p.imageWidth).toBe(1);
   expect(p.imageHeight).toBe(1);
   expect(p.sourceWidth).toBeGreaterThan(0);
@@ -42,6 +45,9 @@ test("kitty graphics transmit+display (png) yields drawable placement", async ()
   expect(placements.length).toBeGreaterThan(0);
   const p = placements[placements.length - 1]!;
   expect(p.imageFormat).toBe(100);
+  expect(typeof p.placementId).toBe("number");
+  expect(p.placementId).toBeGreaterThanOrEqual(0);
+  expect(p.placementExternal).toBe(false);
   expect(p.imageWidth).toBe(1);
   expect(p.imageHeight).toBe(1);
   expect(p.sourceWidth).toBeGreaterThan(0);

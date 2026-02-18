@@ -1,14 +1,52 @@
 import { readFileSync } from "node:fs";
-import { rewriteKittyFileMediaToDirect } from "../src/pty/kitty-media";
+import { dlopen, FFIType, ptr, suffix } from "bun:ffi";
+import {
+  rewriteKittyFileMediaToDirect,
+  type KittyMediaRewriteState,
+} from "../src/pty/kitty-media";
 
 const port = Number(Bun.env.PTY_PORT ?? 8787);
 const defaultShell = Bun.env.SHELL ?? "fish";
 const textDecoder = new TextDecoder();
+const forceGhosttyProfile = Bun.env.RESTTY_PTY_FORCE_GHOSTTY === "1";
+const rewriteKittyFileMedia = Bun.env.RESTTY_KITTY_REWRITE_FILE_MEDIA === "1";
+const O_RDWR = 0x0002;
+const TIOCSWINSZ = process.platform === "darwin" ? 0x80087467 : 0x5414;
+
+const libc = (() => {
+  const names =
+    process.platform === "darwin"
+      ? ["libc.dylib", "libSystem.B.dylib"]
+      : ["libc.so.6", `libc.${suffix}`];
+  for (const name of names) {
+    try {
+      return dlopen(name, {
+        open: {
+          args: [FFIType.cstring, FFIType.i32],
+          returns: FFIType.i32,
+        },
+        ioctl: {
+          args: [FFIType.i32, FFIType.u64, FFIType.ptr],
+          returns: FFIType.i32,
+        },
+        close: {
+          args: [FFIType.i32],
+          returns: FFIType.i32,
+        },
+      });
+    } catch {
+      // try next libc candidate
+    }
+  }
+  return null;
+})();
 
 type PtySocket = {
   url: URL;
   proc?: Bun.Subprocess;
   terminal?: Bun.Terminal;
+  kittyState?: KittyMediaRewriteState;
+  ttyPath?: string;
 };
 
 type ShellSpec = {
@@ -16,6 +54,96 @@ type ShellSpec = {
   args: string[];
   label: string;
 };
+
+type ClientControlMessage =
+  | { type: "input"; data: string }
+  | { type: "resize"; cols: number; rows: number; widthPx?: number; heightPx?: number };
+
+function parseClientControlMessage(text: string): ClientControlMessage | null {
+  try {
+    const parsed = JSON.parse(text) as {
+      type?: unknown;
+      data?: unknown;
+      cols?: unknown;
+      rows?: unknown;
+      widthPx?: unknown;
+      heightPx?: unknown;
+    };
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.type === "input" && typeof parsed.data === "string") {
+      return { type: "input", data: parsed.data };
+    }
+    if (
+      parsed.type === "resize" &&
+      typeof parsed.cols === "number" &&
+      typeof parsed.rows === "number"
+    ) {
+      return {
+        type: "resize",
+        cols: parsed.cols,
+        rows: parsed.rows,
+        widthPx: typeof parsed.widthPx === "number" ? parsed.widthPx : undefined,
+        heightPx: typeof parsed.heightPx === "number" ? parsed.heightPx : undefined,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeJsonControlPayload(text: string): boolean {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("{")) return false;
+  return trimmed.includes("\"type\"");
+}
+
+function resolveTtyPath(pid: number): string | null {
+  if (!Number.isFinite(pid) || pid <= 0) return null;
+  const result = Bun.spawnSync(["ps", "-o", "tty=", "-p", String(pid)], {
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  if (result.exitCode !== 0) return null;
+  const raw = textDecoder.decode(result.stdout).trim();
+  if (!raw || raw === "?" || raw === "??") return null;
+  if (raw.startsWith("/dev/")) return raw;
+  return `/dev/${raw}`;
+}
+
+function applyPixelWinsize(
+  ttyPath: string | undefined,
+  cols: number,
+  rows: number,
+  widthPx: number,
+  heightPx: number,
+): void {
+  if (!ttyPath || !libc) return;
+  if (
+    !Number.isFinite(cols) ||
+    !Number.isFinite(rows) ||
+    !Number.isFinite(widthPx) ||
+    !Number.isFinite(heightPx)
+  ) {
+    return;
+  }
+  if (cols <= 0 || rows <= 0 || widthPx <= 0 || heightPx <= 0) return;
+
+  const ttyPathZ = Buffer.from(`${ttyPath}\0`, "utf8");
+  const fd = libc.symbols.open(ttyPathZ, O_RDWR);
+  if (fd < 0) return;
+  try {
+    const winsize = new Uint8Array(8);
+    const view = new DataView(winsize.buffer);
+    view.setUint16(0, Math.min(0xffff, Math.round(rows)), true);
+    view.setUint16(2, Math.min(0xffff, Math.round(cols)), true);
+    view.setUint16(4, Math.min(0xffff, Math.round(widthPx)), true);
+    view.setUint16(6, Math.min(0xffff, Math.round(heightPx)), true);
+    libc.symbols.ioctl(fd, TIOCSWINSZ, ptr(winsize));
+  } finally {
+    libc.symbols.close(fd);
+  }
+}
 
 function parseShellSpec(spec: string | null | undefined): ShellSpec | null {
   if (!spec) return null;
@@ -59,16 +187,19 @@ function spawnWithFallbacks(
   rows: number,
   cwd: string,
   env: Record<string, string | undefined>,
+  kittyState: KittyMediaRewriteState,
   ws: ServerWebSocket<PtySocket>,
 ) {
   const errors: string[] = [];
-  const kittyState = { remainder: "" };
   const decoder = new TextDecoder();
+  const readKittyMediaFile = rewriteKittyFileMedia
+    ? (path: string) => new Uint8Array(readFileSync(path))
+    : () => {
+        throw new Error("kitty file-media rewrite disabled");
+      };
   const handleOutputText = (text: string) => {
     if (!text) return;
-    const rewritten = rewriteKittyFileMediaToDirect(text, kittyState, (path) =>
-      new Uint8Array(readFileSync(path)),
-    );
+    const rewritten = rewriteKittyFileMediaToDirect(text, kittyState, readKittyMediaFile);
     if (rewritten.length > 0) ws.send(rewritten);
   };
 
@@ -130,21 +261,17 @@ const server = Bun.serve<PtySocket>({
       const rows = Number(url.searchParams.get("rows") ?? 24);
       const shellParam = url.searchParams.get("shell") ?? defaultShell;
       const cwd = url.searchParams.get("cwd") ?? process.cwd();
-      const env = {
-        ...process.env,
-        TERM: "xterm-256color",
-        COLORTERM: "truecolor",
-        TERM_PROGRAM: "ghostty",
-        TERM_PROGRAM_VERSION: "1.0",
-        SNACKS_GHOSTTY: "1",
-        SNACKS_TMUX: "0",
-        SNACKS_ZELLIJ: "0",
-        SNACKS_SSH: "0",
-        TMUX: undefined,
-        ZELLIJ: undefined,
-        ZELLIJ_SESSION_NAME: undefined,
-        ZELLIJ_PANE_ID: undefined,
-      };
+      const kittyState: KittyMediaRewriteState = { remainder: "" };
+      ws.data.kittyState = kittyState;
+      const env: Record<string, string | undefined> = { ...process.env };
+      if (forceGhosttyProfile) {
+        env.TERM = env.TERM || "xterm-ghostty";
+        env.COLORTERM = env.COLORTERM || "truecolor";
+        env.NVIM_TUI_ENABLE_TRUE_COLOR = env.NVIM_TUI_ENABLE_TRUE_COLOR || "1";
+        env.TERM_PROGRAM = "ghostty";
+        env.TERM_PROGRAM_VERSION = env.TERM_PROGRAM_VERSION || "1.0";
+        env.SNACKS_GHOSTTY = "1";
+      }
 
       const candidates = buildShellCandidates(shellParam);
       const { terminal, proc, shell, errors } = spawnWithFallbacks(
@@ -153,6 +280,7 @@ const server = Bun.serve<PtySocket>({
         Number.isFinite(rows) ? rows : 24,
         cwd,
         env,
+        kittyState,
         ws,
       );
 
@@ -170,6 +298,7 @@ const server = Bun.serve<PtySocket>({
 
       ws.data.proc = proc;
       ws.data.terminal = terminal;
+      ws.data.ttyPath = resolveTtyPath(proc.pid);
       try {
         ws.send(JSON.stringify({ type: "status", shell }));
       } catch {}
@@ -196,29 +325,46 @@ const server = Bun.serve<PtySocket>({
       const terminal = ws.data.terminal;
       if (!terminal) return;
 
+      const handleControlText = (text: string): boolean => {
+        const msg = parseClientControlMessage(text);
+        if (!msg) return false;
+        if (msg.type === "input") {
+          terminal.write(msg.data);
+          return true;
+        }
+        const cols = Number(msg.cols);
+        const rows = Number(msg.rows);
+        if (Number.isFinite(cols) && Number.isFinite(rows)) {
+          terminal.resize(cols, rows);
+          const widthPx = Number(msg.widthPx);
+          const heightPx = Number(msg.heightPx);
+          applyPixelWinsize(ws.data.ttyPath, cols, rows, widthPx, heightPx);
+        }
+        return true;
+      };
+
       if (typeof message === "string") {
-        try {
-          const msg = JSON.parse(message);
-          if (msg?.type === "input" && typeof msg.data === "string") {
-            terminal.write(msg.data);
-            return;
-          }
-          if (msg?.type === "resize") {
-            const cols = Number(msg.cols);
-            const rows = Number(msg.rows);
-            if (Number.isFinite(cols) && Number.isFinite(rows)) {
-              terminal.resize(cols, rows);
-            }
-            return;
-          }
-        } catch {
-          terminal.write(message);
+        if (handleControlText(message)) {
           return;
         }
+        if (looksLikeJsonControlPayload(message)) return;
+        terminal.write(message);
+        return;
       }
 
       if (message instanceof ArrayBuffer) {
-        terminal.write(textDecoder.decode(message));
+        const text = textDecoder.decode(message);
+        if (handleControlText(text)) return;
+        if (looksLikeJsonControlPayload(text)) return;
+        terminal.write(text);
+        return;
+      }
+
+      if (ArrayBuffer.isView(message)) {
+        const text = textDecoder.decode(message as Uint8Array);
+        if (handleControlText(text)) return;
+        if (looksLikeJsonControlPayload(text)) return;
+        terminal.write(text);
       }
     },
     close(ws) {

@@ -1,5 +1,10 @@
 import { WebContainer, type WebContainerProcess } from "@webcontainer/api";
-import type { PtyCallbacks, PtyConnectOptions, PtyTransport } from "../../src/internal.ts";
+import type {
+  PtyCallbacks,
+  PtyConnectOptions,
+  PtyResizeMeta,
+  PtyTransport,
+} from "../../src/internal.ts";
 
 type WebContainerPtyOptions = {
   getCommand?: () => string;
@@ -459,7 +464,7 @@ export function createWebContainerPtyTransport(options: WebContainerPtyOptions =
       });
       return true;
     },
-    resize: (cols: number, rows: number) => {
+    resize: (cols: number, rows: number, _meta?: PtyResizeMeta) => {
       if (!connected || !proc) return false;
       try {
         proc.resize({ cols, rows });

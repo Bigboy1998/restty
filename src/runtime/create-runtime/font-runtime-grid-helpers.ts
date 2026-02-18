@@ -8,7 +8,6 @@ import type {
   CellMetrics,
   FontConfigRef,
   GridStateRef,
-  ResizeStateRef,
 } from "./font-runtime-helpers.types";
 
 type CreateFontRuntimeGridHelpersOptions = {
@@ -26,10 +25,6 @@ type CreateFontRuntimeGridHelpersOptions = {
   getWasmHandle: () => number;
   ptyTransport: PtyTransport;
   setNeedsRender: () => void;
-  resizeState: ResizeStateRef;
-  resizeActiveMs: number;
-  resizeCommitDebounceMs: number;
-  onSyncKittyOverlaySize: () => void;
   shapeClusterWithFont: (entry: FontEntry, text: string) => { advance: number };
 };
 
@@ -49,15 +44,8 @@ export function createFontRuntimeGridHelpers(options: CreateFontRuntimeGridHelpe
     getWasmHandle,
     ptyTransport,
     setNeedsRender,
-    resizeState,
-    resizeActiveMs,
-    resizeCommitDebounceMs,
-    onSyncKittyOverlaySize,
     shapeClusterWithFont,
   } = options;
-
-  let pendingTerminalResize: { cols: number; rows: number } | null = null;
-  let terminalResizeTimer = 0;
 
   function computeCellMetrics(): CellMetrics | null {
     const primary = fontState.fonts[0];
@@ -81,53 +69,20 @@ export function createFontRuntimeGridHelpers(options: CreateFontRuntimeGridHelpe
     const wasmReady = getWasmReady();
     const wasm = getWasm();
     const wasmHandle = getWasmHandle();
+    const canvas = getCanvas();
     if (wasmReady && wasm && wasmHandle) {
       wasm.resize(wasmHandle, cols, rows);
       wasm.renderUpdate(wasmHandle);
     }
     if (ptyTransport.isConnected()) {
-      ptyTransport.resize(cols, rows);
+      ptyTransport.resize(cols, rows, {
+        widthPx: canvas.width,
+        heightPx: canvas.height,
+        cellW: gridState.cellW,
+        cellH: gridState.cellH,
+      });
     }
     setNeedsRender();
-  }
-
-  function flushPendingTerminalResize(): void {
-    if (terminalResizeTimer) {
-      clearTimeout(terminalResizeTimer);
-      terminalResizeTimer = 0;
-    }
-    if (!pendingTerminalResize) return;
-    const { cols, rows } = pendingTerminalResize;
-    pendingTerminalResize = null;
-    commitTerminalResize(cols, rows);
-  }
-
-  function scheduleTerminalResizeCommit(
-    cols: number,
-    rows: number,
-    options: { immediate?: boolean } = {},
-  ): void {
-    pendingTerminalResize = { cols, rows };
-    if (options.immediate) {
-      flushPendingTerminalResize();
-      return;
-    }
-    if (terminalResizeTimer) {
-      clearTimeout(terminalResizeTimer);
-      terminalResizeTimer = 0;
-    }
-    terminalResizeTimer = window.setTimeout(() => {
-      terminalResizeTimer = 0;
-      flushPendingTerminalResize();
-    }, resizeCommitDebounceMs);
-  }
-
-  function resetTerminalResizeScheduler(): void {
-    if (terminalResizeTimer) {
-      clearTimeout(terminalResizeTimer);
-      terminalResizeTimer = 0;
-    }
-    pendingTerminalResize = null;
   }
 
   function updateGrid(): void {
@@ -169,18 +124,12 @@ export function createFontRuntimeGridHelpers(options: CreateFontRuntimeGridHelpe
     }
 
     if (changed) {
-      const resizeActive = performance.now() - resizeState.lastAt <= resizeActiveMs;
-      scheduleTerminalResizeCommit(cols, rows, { immediate: !resizeActive });
+      commitTerminalResize(cols, rows);
     }
-
-    onSyncKittyOverlaySize();
   }
 
   return {
     computeCellMetrics,
     updateGrid,
-    flushPendingTerminalResize,
-    scheduleTerminalResizeCommit,
-    resetTerminalResizeScheduler,
   };
 }

@@ -41,7 +41,8 @@ export function drawWebGPUFrame(params: DrawWebGPUFrameParams) {
     ensureInstanceBuffer,
     GLYPH_INSTANCE_FLOATS,
     wasm,
-    drawKittyOverlay,
+    collectKittyDrawPlan,
+    resolveKittyWebGPUBindGroup,
   } = deps;
 
   emitWebGPUQueuedGlyphs({
@@ -189,17 +190,22 @@ export function drawWebGPUFrame(params: DrawWebGPUFrameParams) {
     }
   };
 
-  const rectPreBatches: Array<{
+  const rectBaseBatches: Array<{
     array: Float32Array;
     offset: number;
     instances: number;
   }> = [];
-  const rectPostBatches: Array<{
+  const rectDecorBatches: Array<{
     array: Float32Array;
     offset: number;
     instances: number;
   }> = [];
-  const pushRectBatch = (target: typeof rectPreBatches, data: number[]) => {
+  const rectTopBatches: Array<{
+    array: Float32Array;
+    offset: number;
+    instances: number;
+  }> = [];
+  const pushRectBatch = (target: typeof rectBaseBatches, data: number[]) => {
     if (!data.length) return;
     target.push({
       array: new Float32Array(data),
@@ -208,27 +214,23 @@ export function drawWebGPUFrame(params: DrawWebGPUFrameParams) {
     });
   };
 
-  pushRectBatch(rectPreBatches, frame.bgData);
-  pushRectBatch(rectPreBatches, frame.selectionData);
-  pushRectBatch(rectPreBatches, frame.underlineData);
-  pushRectBatch(rectPreBatches, frame.fgRectData);
-  pushRectBatch(rectPostBatches, frame.cursorData);
-  pushRectBatch(rectPostBatches, frame.overlayData);
+  pushRectBatch(rectBaseBatches, frame.bgData);
+  pushRectBatch(rectBaseBatches, frame.selectionData);
+  pushRectBatch(rectDecorBatches, frame.underlineData);
+  pushRectBatch(rectDecorBatches, frame.fgRectData);
+  pushRectBatch(rectTopBatches, frame.cursorData);
+  pushRectBatch(rectTopBatches, frame.overlayData);
 
-  const glyphMainBatches: Array<{
+  type GlyphBatch = {
     array: Float32Array;
     offset: number;
     instances: number;
     pipeline: GPURenderPipeline;
     bindGroup: GPUBindGroup;
-  }> = [];
-  const glyphOverlayBatches: Array<{
-    array: Float32Array;
-    offset: number;
-    instances: number;
-    pipeline: GPURenderPipeline;
-    bindGroup: GPUBindGroup;
-  }> = [];
+  };
+
+  const glyphMainBatches: GlyphBatch[] = [];
+  const glyphOverlayBatches: GlyphBatch[] = [];
 
   for (const [fontIndex, glyphData] of frame.glyphDataNearestByFont.entries()) {
     if (!glyphData.length) continue;
@@ -282,8 +284,70 @@ export function drawWebGPUFrame(params: DrawWebGPUFrameParams) {
     });
   }
 
-  uploadInstanceBatches("rect", [...rectPreBatches, ...rectPostBatches]);
-  uploadInstanceBatches("glyph", [...glyphMainBatches, ...glyphOverlayBatches]);
+  const kittyPlacements = wasm && wasmHandle ? wasm.getKittyPlacements(wasmHandle) : [];
+  const kittyPlan = collectKittyDrawPlan(kittyPlacements, cellW, cellH);
+  const kittyUnderlayBatches: GlyphBatch[] = [];
+  const kittyOverlayBatches: GlyphBatch[] = [];
+  const pushKittyBatches = (target: GlyphBatch[], slices: typeof kittyPlan.underlay) => {
+    let currentBindGroup: GPUBindGroup | null = null;
+    let currentData: number[] = [];
+    const flush = () => {
+      if (!currentBindGroup || !currentData.length) return;
+      target.push({
+        array: new Float32Array(currentData),
+        offset: 0,
+        instances: currentData.length / GLYPH_INSTANCE_FLOATS,
+        pipeline: state.glyphPipeline,
+        bindGroup: currentBindGroup,
+      });
+      currentData = [];
+    };
+    for (const slice of slices) {
+      const bindGroup = resolveKittyWebGPUBindGroup(state, slice, false);
+      if (!bindGroup) continue;
+      if (currentBindGroup && bindGroup !== currentBindGroup) {
+        flush();
+      }
+      currentBindGroup = bindGroup;
+      const invW = slice.imageWidth > 0 ? 1 / slice.imageWidth : 0;
+      const invH = slice.imageHeight > 0 ? 1 / slice.imageHeight : 0;
+      const u0 = slice.sx * invW;
+      const v0 = slice.sy * invH;
+      const u1 = (slice.sx + slice.sw) * invW;
+      const v1 = (slice.sy + slice.sh) * invH;
+      currentData.push(
+        slice.dx,
+        slice.dy,
+        slice.dw,
+        slice.dh,
+        u0,
+        v0,
+        u1,
+        v1,
+        1,
+        1,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+      );
+    }
+    flush();
+  };
+  pushKittyBatches(kittyUnderlayBatches, kittyPlan.underlay);
+  pushKittyBatches(kittyOverlayBatches, kittyPlan.overlay);
+
+  uploadInstanceBatches("rect", [...rectBaseBatches, ...rectDecorBatches, ...rectTopBatches]);
+  uploadInstanceBatches("glyph", [
+    ...glyphMainBatches,
+    ...glyphOverlayBatches,
+    ...kittyUnderlayBatches,
+    ...kittyOverlayBatches,
+  ]);
 
   pass.setVertexBuffer(0, state.vertexBuffer);
   const drawRectBatches = (
@@ -319,9 +383,12 @@ export function drawWebGPUFrame(params: DrawWebGPUFrameParams) {
     }
   };
 
-  drawRectBatches(rectPreBatches);
+  drawRectBatches(rectBaseBatches);
+  drawGlyphBatches(kittyUnderlayBatches);
+  drawRectBatches(rectDecorBatches);
   drawGlyphBatches(glyphMainBatches);
-  drawRectBatches(rectPostBatches);
+  drawGlyphBatches(kittyOverlayBatches);
+  drawRectBatches(rectTopBatches);
   drawGlyphBatches(glyphOverlayBatches);
 
   pass.end();
@@ -381,6 +448,4 @@ export function drawWebGPUFrame(params: DrawWebGPUFrameParams) {
   }
 
   device.queue.submit([encoder.finish()]);
-  const kittyPlacements = wasm && wasmHandle ? wasm.getKittyPlacements(wasmHandle) : [];
-  drawKittyOverlay(kittyPlacements, cellW, cellH);
 }

@@ -37,7 +37,6 @@ type RuntimeInternalState = {
   rafId: number;
   frameCount: number;
   lastFpsTime: number;
-  resizeWasActive: boolean;
   nextBlinkTime: number;
 };
 
@@ -101,7 +100,6 @@ type CreateRuntimeAppApiOptions = {
   BACKGROUND_RENDER_FPS: number;
   KITTY_FLAG_REPORT_EVENTS: number;
   resizeState: { lastAt: number };
-  flushPendingTerminalResize: () => void;
   tickWebGPU: (state: WebGPUState) => void;
   tickWebGL: (state: WebGLState) => void;
   updateGrid: () => void;
@@ -119,7 +117,6 @@ type CreateRuntimeAppApiOptions = {
   destroyWebGPUStageTargets: () => void;
   clearWebGLShaderStages: (state?: WebGLState) => void;
   destroyWebGLStageTargets: (state?: WebGLState) => void;
-  resetTerminalResizeScheduler: () => void;
 };
 
 export function createRuntimeAppApi(options: CreateRuntimeAppApiOptions): RuntimeAppApiRuntime {
@@ -152,7 +149,6 @@ export function createRuntimeAppApi(options: CreateRuntimeAppApiOptions): Runtim
     BACKGROUND_RENDER_FPS,
     KITTY_FLAG_REPORT_EVENTS,
     resizeState,
-    flushPendingTerminalResize,
     tickWebGPU,
     tickWebGL,
     updateGrid,
@@ -170,7 +166,6 @@ export function createRuntimeAppApi(options: CreateRuntimeAppApiOptions): Runtim
     destroyWebGPUStageTargets,
     clearWebGLShaderStages,
     destroyWebGLStageTargets,
-    resetTerminalResizeScheduler,
   } = options;
 
   const internalState: RuntimeInternalState = {
@@ -180,7 +175,6 @@ export function createRuntimeAppApi(options: CreateRuntimeAppApiOptions): Runtim
     rafId: 0,
     frameCount: 0,
     lastFpsTime: performance.now(),
-    resizeWasActive: false,
     nextBlinkTime: performance.now() + CURSOR_BLINK_MS,
   };
   const maxScrollbackBytes = resolveMaxScrollbackBytes(options);
@@ -207,10 +201,7 @@ export function createRuntimeAppApi(options: CreateRuntimeAppApiOptions): Runtim
       const resizeActive = now - resizeState.lastAt <= RESIZE_ACTIVE_MS;
       if (resizeActive) {
         writeState({ needsRender: true });
-      } else if (internalState.resizeWasActive) {
-        flushPendingTerminalResize();
       }
-      internalState.resizeWasActive = resizeActive;
       const hidden =
         typeof document !== "undefined" &&
         typeof document.visibilityState === "string" &&
@@ -562,9 +553,6 @@ export function createRuntimeAppApi(options: CreateRuntimeAppApiOptions): Runtim
         rebuildWebGPUShaderStages(gpuState);
         setShaderStagesDirty(false);
         updateGrid();
-        console.log(
-          `[init webgpu] canvas=${canvas.width}x${canvas.height} grid=${gridState.cols}x${gridState.rows}`,
-        );
         await wasmPromise;
         internalState.rafId = requestAnimationFrame(() => loop(gpuState));
         return;
@@ -593,9 +581,6 @@ export function createRuntimeAppApi(options: CreateRuntimeAppApiOptions): Runtim
         rebuildWebGLShaderStages(glState);
         setShaderStagesDirty(false);
         updateGrid();
-        console.log(
-          `[init webgl2] canvas=${canvas.width}x${canvas.height} grid=${gridState.cols}x${gridState.rows}`,
-        );
         await wasmPromise;
         internalState.rafId = requestAnimationFrame(() => loop(glState));
         return;
@@ -613,7 +598,6 @@ export function createRuntimeAppApi(options: CreateRuntimeAppApiOptions): Runtim
   function destroy() {
     cancelAnimationFrame(internalState.rafId);
     lifecycleThemeSizeRuntime.cancelScheduledSizeUpdate();
-    resetTerminalResizeScheduler();
     ptyInputRuntime.cancelSyncOutputReset();
     ptyInputRuntime.disconnectPty();
     ptyTransport.destroy?.();

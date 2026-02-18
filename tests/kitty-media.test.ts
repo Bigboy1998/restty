@@ -77,6 +77,28 @@ test("keeps unresolved file-medium transfers untouched", () => {
   })).toBe(input);
 });
 
+test("drops echoed kitty response packets from PTY stream", () => {
+  const state = { remainder: "" };
+  const input = `before${kittyApc("i=9,p=1", "ENOENT: image not found")}after`;
+  const out = rewriteKittyFileMediaToDirect(input, state, () => new Uint8Array(0));
+  expect(out).toBe("beforeafter");
+});
+
+test("sanitizes invalid kitty control numeric values", () => {
+  const state = { remainder: "" };
+  const input = "\x1b_Gp=11,i=2031647,a=p,C=1,q=2,r=11,c=nan\x1b\\";
+  const out = rewriteKittyFileMediaToDirect(input, state, () => new Uint8Array(0));
+  expect(out.includes("c=nan")).toBe(false);
+  expect(out).toBe("\x1b_Gp=11,i=2031647,a=p,C=1,q=2,r=11\x1b\\");
+});
+
+test("drops invalid placement dimensions without mutating valid values", () => {
+  const state = { remainder: "" };
+  const input = "\x1b_Ga=p,p=12,i=7,C=1,r=14,c=nan\x1b\\";
+  const out = rewriteKittyFileMediaToDirect(input, state, () => new Uint8Array(0));
+  expect(out).toBe("\x1b_Ga=p,p=12,i=7,C=1,r=14\x1b\\");
+});
+
 test("rewritten APC is accepted by kitty graphics parser", async () => {
   const dir = mkdtempSync(join(tmpdir(), "restty-kitty-media-"));
   try {

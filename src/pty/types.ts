@@ -3,9 +3,16 @@
  * - input: terminal keystrokes or pasted text
  * - resize: window size change notification
  */
+export type PtyResizeMeta = {
+  widthPx?: number;
+  heightPx?: number;
+  cellW?: number;
+  cellH?: number;
+};
+
 export type PtyMessage =
   | { type: "input"; data: string }
-  | { type: "resize"; cols: number; rows: number };
+  | ({ type: "resize"; cols: number; rows: number } & PtyResizeMeta);
 
 /** Server notification that the PTY session is ready, with the active shell name. */
 export type PtyStatusMessage = { type: "status"; shell?: string };
@@ -85,7 +92,7 @@ export type PtyTransport = {
   /** Send terminal input data; returns true if the data was sent. */
   sendInput: (data: string) => boolean;
   /** Notify the PTY of a terminal resize; returns true if the message was sent. */
-  resize: (cols: number, rows: number) => boolean;
+  resize: (cols: number, rows: number, meta?: PtyResizeMeta) => boolean;
   /** Whether the transport currently has an active connection. */
   isConnected: () => boolean;
   /** Release all resources held by the transport. */

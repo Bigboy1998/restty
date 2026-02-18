@@ -5,8 +5,6 @@ import {
 } from "../../selection";
 import { bindImeEvents } from "./interaction-runtime/bind-ime-events";
 import { bindPointerEvents } from "./interaction-runtime/bind-pointer-events";
-import { createKittyImageCache } from "./interaction-runtime/kitty-image-cache";
-import { createKittyOverlayRuntime } from "./interaction-runtime/kitty-overlay-runtime";
 import { createScrollbarRuntime } from "./interaction-runtime/scrollbar-runtime";
 import type {
   BindCanvasEventsOptions,
@@ -37,7 +35,6 @@ export function createRuntimeInteraction(
     touchSelectionLongPressMs,
     touchSelectionMoveThresholdPx,
     showOverlayScrollbar,
-    kittyOverlayDebugEnabled,
     imeInput,
     cleanupCanvasFns,
     getCanvas,
@@ -165,17 +162,6 @@ export function createRuntimeInteraction(
     getWasmExports,
     updateLinkHover: () => updateLinkHover(null),
     markNeedsRender,
-  });
-
-  const kittyImageCache = createKittyImageCache({
-    getWasm,
-    markNeedsRender,
-  });
-
-  const kittyOverlayRuntime = createKittyOverlayRuntime({
-    getCanvas,
-    kittyOverlayDebugEnabled,
-    kittyImageCache,
   });
 
   const positionToCell = (event: { clientX: number; clientY: number }) => {
@@ -321,16 +307,12 @@ export function createRuntimeInteraction(
     scrollbarState,
     imeState,
     updateCanvasCursor,
-    syncKittyOverlaySize: kittyOverlayRuntime.syncKittyOverlaySize,
-    clearKittyOverlay: kittyOverlayRuntime.clearKittyOverlay,
-    drawKittyOverlay: kittyOverlayRuntime.drawKittyOverlay,
+    updateLinkHover,
     positionToCell,
     positionToPixel,
     clearSelection,
     updateImePosition,
     appendOverlayScrollbar: scrollbarRuntime.appendOverlayScrollbar,
     bindCanvasEvents,
-    detachKittyOverlayCanvas: kittyOverlayRuntime.detachKittyOverlayCanvas,
-    clearKittyImageCache: kittyImageCache.clearKittyImageCache,
   };
 }

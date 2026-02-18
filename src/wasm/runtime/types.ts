@@ -25,6 +25,8 @@ export type CursorInfo = {
 /** Kitty graphics protocol image placement descriptor. */
 export type KittyPlacement = {
   imageId: number;
+  placementId: number;
+  placementExternal: boolean;
   imageFormat: number;
   imageWidth: number;
   imageHeight: number;

@@ -4,7 +4,6 @@ import {
   getNerdConstraint,
   isSymbolFont,
   isColorEmojiFont,
-  isNerdSymbolFont,
   fontMaxCellSpan,
   fontScaleOverride,
   fontAdvanceUnits,
@@ -297,7 +296,6 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   const RESIZE_OVERLAY_HOLD_MS = 500;
   const RESIZE_OVERLAY_FADE_MS = 400;
   const RESIZE_ACTIVE_MS = 180;
-  const RESIZE_COMMIT_DEBOUNCE_MS = 36;
   const resizeState = {
     active: false,
     lastAt: 0,
@@ -516,6 +514,17 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     onMouseStatus: callbacks?.onMouseStatus,
     appendLog,
     getGridSize: () => ({ cols: gridState.cols || 0, rows: gridState.rows || 0 }),
+    getResizeMeta: () => {
+      const cols = gridState.cols || 0;
+      const rows = gridState.rows || 0;
+      if (cols <= 0 || rows <= 0) return null;
+      return {
+        widthPx: canvas.width,
+        heightPx: canvas.height,
+        cellW: gridState.cellW,
+        cellH: gridState.cellH,
+      };
+    },
     getCursorForCpr: () => lastCursorForCpr,
     sendInput,
     runBeforeInputHook,
@@ -598,9 +607,6 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     pickFontIndexForText,
     computeCellMetrics,
     updateGrid,
-    flushPendingTerminalResize,
-    scheduleTerminalResizeCommit,
-    resetTerminalResizeScheduler,
     ensureAtlasForFont,
   } = createRuntimeFontRuntimeHelpers({
     fontState,
@@ -619,9 +625,6 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     setNeedsRender: () => {
       needsRender = true;
     },
-    resizeState,
-    resizeActiveMs: RESIZE_ACTIVE_MS,
-    resizeCommitDebounceMs: RESIZE_COMMIT_DEBOUNCE_MS,
     getFontHinting: () => fontHinting,
     getFontHintTarget: () => fontHintTarget,
     fontScaleOverrides: FONT_SCALE_OVERRIDES,
@@ -723,7 +726,6 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     computeCellMetrics,
     updateGrid,
     clearKittyRenderCaches: kittyRenderRuntime.clearKittyRenderCaches,
-    scheduleTerminalResizeCommit,
     sendKeyInput,
     clearWebGLShaderStages,
     destroyWebGLStageTargets,
@@ -889,13 +891,6 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
           activeState.glyphAtlases = new Map();
         }
         fontError = null;
-        console.log("[font] Font entries loaded:");
-        for (let i = 0; i < entries.length; i++) {
-          const entry = entries[i];
-          const sym = isSymbolFont(entry);
-          const nerd = isNerdSymbolFont(entry);
-          console.log(`  [${i}] ${entry.label} - symbol:${sym} nerd:${nerd}`);
-        }
         if (entries.length > 1) {
           log(`font loaded (+${entries.length - 1} fallback)`);
         } else {
@@ -1159,7 +1154,6 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     BACKGROUND_RENDER_FPS,
     KITTY_FLAG_REPORT_EVENTS,
     resizeState,
-    flushPendingTerminalResize,
     tickWebGPU,
     tickWebGL,
     updateGrid,
@@ -1177,7 +1171,6 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     destroyWebGPUStageTargets,
     clearWebGLShaderStages,
     destroyWebGLStageTargets,
-    resetTerminalResizeScheduler,
     getSelectionText,
     initialPreferredRenderer: options.renderer ?? "auto",
     maxScrollbackBytes: options.maxScrollbackBytes,

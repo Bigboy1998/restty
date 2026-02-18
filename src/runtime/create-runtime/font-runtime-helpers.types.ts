@@ -36,10 +36,6 @@ export type FontConfigRef = {
   sizePx: number;
 };
 
-export type ResizeStateRef = {
-  lastAt: number;
-};
-
 export type ShapeClusterResult = {
   glyphs: ShapedGlyph[];
   advance: number;
@@ -113,9 +109,6 @@ export type CreateRuntimeFontRuntimeHelpersOptions = {
   getWasmHandle: () => number;
   ptyTransport: PtyTransport;
   setNeedsRender: () => void;
-  resizeState: ResizeStateRef;
-  resizeActiveMs: number;
-  resizeCommitDebounceMs: number;
   getFontHinting: () => boolean;
   getFontHintTarget: () => ResttyFontHintTarget;
   fontScaleOverrides: Array<{ match: RegExp; scale: number }>;

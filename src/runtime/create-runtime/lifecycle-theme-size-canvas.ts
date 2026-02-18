@@ -16,9 +16,6 @@ export function createLifecycleCanvasHandlers(deps: LifecycleThemeSizeDeps) {
       cellH: deps.gridState.cellH,
       fontSizePx: deps.gridState.fontSizePx,
     };
-    console.log(
-      `[saveCanvasState] ${savedCanvasState.width}x${savedCanvasState.height} grid=${savedCanvasState.gridCols}x${savedCanvasState.gridRows}`,
-    );
   }
 
   function restoreCanvasState(): void {
@@ -32,9 +29,6 @@ export function createLifecycleCanvasHandlers(deps: LifecycleThemeSizeDeps) {
     deps.gridState.cellW = savedCanvasState.cellW;
     deps.gridState.cellH = savedCanvasState.cellH;
     deps.gridState.fontSizePx = savedCanvasState.fontSizePx;
-    console.log(
-      `[restoreCanvasState] ${canvas.width}x${canvas.height} grid=${deps.gridState.cols}x${deps.gridState.rows}`,
-    );
     savedCanvasState = null;
   }
 
@@ -46,7 +40,7 @@ export function createLifecycleCanvasHandlers(deps: LifecycleThemeSizeDeps) {
     saveCanvasState();
     for (const cleanup of deps.cleanupCanvasFns) cleanup();
     deps.cleanupCanvasFns.length = 0;
-    deps.detachKittyOverlayCanvas();
+    deps.clearKittyRenderCaches();
     deps.destroyWebGPUStageTargets();
     const activeState = deps.getActiveState();
     if (activeState && "gl" in activeState) {
@@ -109,7 +103,6 @@ export function createLifecycleCanvasHandlers(deps: LifecycleThemeSizeDeps) {
       deps.resizeState.cols = Math.max(1, Math.floor(canvas.width / metrics.cellW));
       deps.resizeState.rows = Math.max(1, Math.floor(canvas.height / metrics.cellH));
     }
-    deps.syncKittyOverlaySize();
     deps.updateGrid();
     deps.markNeedsRender();
     deps.resetLastRenderTime();
@@ -143,7 +136,6 @@ export function createLifecycleCanvasHandlers(deps: LifecycleThemeSizeDeps) {
     deps.resizeState.rows = nextRows;
 
     deps.updateGrid();
-    deps.scheduleTerminalResizeCommit(nextCols, nextRows, { immediate: true });
     deps.markNeedsRender();
     deps.resetLastRenderTime();
   }

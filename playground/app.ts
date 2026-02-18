@@ -5,6 +5,7 @@ import {
   getBuiltinTheme,
   parseGhosttyTheme,
   type GhosttyTheme,
+  type PtyResizeMeta,
   type PtyTransport,
   type ResttyFontSource,
   type ResttyManagedAppPane,
@@ -604,8 +605,8 @@ function createAdaptivePtyTransport(): PtyTransport {
     sendInput: (data: string) => {
       return activeTransport?.sendInput(data) ?? false;
     },
-    resize: (cols: number, rows: number) => {
-      return activeTransport?.resize(cols, rows) ?? false;
+    resize: (cols: number, rows: number, meta?: PtyResizeMeta) => {
+      return activeTransport?.resize(cols, rows, meta) ?? false;
     },
     isConnected: () => {
       return activeTransport?.isConnected() ?? false;

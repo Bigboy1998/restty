@@ -72,17 +72,11 @@ export type LifecycleThemeSizeDeps = {
   bindCanvasEvents: () => void;
   computeCellMetrics: () => { cellW: number; cellH: number } | null;
   updateGrid: () => void;
-  syncKittyOverlaySize: () => void;
-  scheduleTerminalResizeCommit: (
-    cols: number,
-    rows: number,
-    options?: { immediate?: boolean },
-  ) => void;
+  clearKittyRenderCaches: () => void;
   sendKeyInput: (text: string, source?: string) => void;
   clearWebGLShaderStages: (state?: WebGLState) => void;
   destroyWebGLStageTargets: (state?: WebGLState) => void;
   destroyWebGPUStageTargets: () => void;
-  detachKittyOverlayCanvas: () => void;
   setShaderStagesDirty: (value: boolean) => void;
   markNeedsRender: () => void;
   resetLastRenderTime: () => void;

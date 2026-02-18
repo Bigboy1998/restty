@@ -1,6 +1,6 @@
 import type { InputHandler } from "../../../input";
 import type { createSelectionState } from "../../../selection";
-import type { KittyPlacement, RenderState, ResttyWasm, ResttyWasmExports } from "../../../wasm";
+import type { RenderState, ResttyWasm, ResttyWasmExports } from "../../../wasm";
 
 export type RuntimeCell = {
   row: number;
@@ -75,7 +75,6 @@ export type CreateRuntimeInteractionOptions = {
   touchSelectionLongPressMs: number;
   touchSelectionMoveThresholdPx: number;
   showOverlayScrollbar: boolean;
-  kittyOverlayDebugEnabled: boolean;
   imeInput: HTMLTextAreaElement | null;
   cleanupCanvasFns: Array<() => void>;
   getCanvas: () => HTMLCanvasElement;
@@ -96,9 +95,7 @@ export type RuntimeInteraction = {
   scrollbarState: RuntimeScrollbarState;
   imeState: RuntimeImeState;
   updateCanvasCursor: () => void;
-  syncKittyOverlaySize: () => void;
-  clearKittyOverlay: () => void;
-  drawKittyOverlay: (placements: KittyPlacement[], cellW: number, cellH: number) => void;
+  updateLinkHover: (cell: RuntimeCell | null) => void;
   positionToCell: (event: { clientX: number; clientY: number }) => RuntimeCell;
   positionToPixel: (event: { clientX: number; clientY: number }) => { x: number; y: number };
   clearSelection: () => void;
@@ -114,6 +111,4 @@ export type RuntimeInteraction = {
     len: number,
   ) => void;
   bindCanvasEvents: (bindOptions: BindCanvasEventsOptions) => void;
-  detachKittyOverlayCanvas: () => void;
-  clearKittyImageCache: () => void;
 };

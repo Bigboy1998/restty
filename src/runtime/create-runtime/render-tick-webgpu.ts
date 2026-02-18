@@ -17,7 +17,6 @@ export function tickWebGPU(deps: RuntimeTickDeps, state: WebGPUState) {
     updateGrid,
     getRenderState,
     fontState,
-    clearKittyOverlay,
     resolveBlendFlags,
     alphaBlending,
     srgbToLinearColor,
@@ -64,7 +63,6 @@ export function tickWebGPU(deps: RuntimeTickDeps, state: WebGPUState) {
     // During live resize, render state can be momentarily unavailable.
     // Keep the last presented frame instead of flashing a cleared frame.
     if (deps.lastRenderState) {
-      clearKittyOverlay();
       return;
     }
     const { useLinearBlending } = resolveBlendFlags(alphaBlending, "webgpu", state);
@@ -83,7 +81,6 @@ export function tickWebGPU(deps: RuntimeTickDeps, state: WebGPUState) {
     });
     pass.end();
     device.queue.submit([encoder.finish()]);
-    clearKittyOverlay();
     return;
   }
 

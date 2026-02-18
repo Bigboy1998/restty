@@ -24,7 +24,6 @@ export function buildWebGLTickContext(
     updateGrid,
     getRenderState,
     fontState,
-    clearKittyOverlay,
     resolveBlendFlags,
     alphaBlending,
     reportTermSize,
@@ -82,7 +81,6 @@ export function buildWebGLTickContext(
 
   const render = getRenderState();
   if (!render || !fontState.font) {
-    clearKittyOverlay();
     return null;
   }
 
@@ -107,7 +105,6 @@ export function buildWebGLTickContext(
   } = render;
 
   if (!codepoints || !fgBytes) {
-    clearKittyOverlay();
     return null;
   }
 

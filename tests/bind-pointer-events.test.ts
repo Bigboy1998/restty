@@ -103,6 +103,20 @@ function createPointerEvent(
   return { event, prevented: () => prevented };
 }
 
+function createMouseEvent(
+  overrides: Partial<MouseEvent> = {},
+): { event: MouseEvent; prevented: () => boolean } {
+  let prevented = false;
+  const event = {
+    shiftKey: false,
+    preventDefault: () => {
+      prevented = true;
+    },
+    ...overrides,
+  } as MouseEvent;
+  return { event, prevented: () => prevented };
+}
+
 test("bindPointerEvents routes primary click to app mouse when mouse reporting is active", () => {
   const mouseKinds: string[] = [];
   const canvas = new FakeCanvas();
@@ -332,4 +346,74 @@ test("bindPointerEvents routes mouse when reporting is active even outside alt-s
   canvas.emit("pointerdown", down.event as unknown as Event);
   expect(mouseKinds).toEqual(["down"]);
   expect(down.prevented()).toBe(true);
+});
+
+test("bindPointerEvents keeps Shift+contextmenu as local bypass", () => {
+  const canvas = new FakeCanvas();
+
+  bindPointerEvents({
+    canvas: canvas as unknown as HTMLCanvasElement,
+    bindOptions: {
+      inputHandler: createInputHandlerStub({
+        sendMouseEvent: () => true,
+      }),
+      sendKeyInput: () => {},
+      sendPasteText: () => {},
+      sendPastePayloadFromDataTransfer: () => false,
+      getLastKeydownSeq: () => "",
+      getLastKeydownSeqAt: () => 0,
+      keydownBeforeinputDedupeMs: 80,
+      openLink: () => {},
+    },
+    touchSelectionMode: "off",
+    touchSelectionLongPressMs: 450,
+    touchSelectionMoveThresholdPx: 10,
+    selectionState: { active: false, dragging: false, anchor: null, focus: null },
+    touchSelectionState: {
+      pendingPointerId: null,
+      activePointerId: null,
+      panPointerId: null,
+      pendingCell: null,
+      pendingStartedAt: 0,
+      pendingStartX: 0,
+      pendingStartY: 0,
+      panLastY: 0,
+      pendingTimer: 0,
+    },
+    desktopSelectionState: {
+      pendingPointerId: null,
+      pendingCell: null,
+      startedWithActiveSelection: false,
+    },
+    scrollbarDragState: { pointerId: null, thumbGrabRatio: 0.5 },
+    linkState: { hoverId: 0, hoverUri: "" },
+    cleanupCanvasFns: [],
+    isTouchPointer: (event) => event.pointerType === "touch",
+    clearPendingTouchSelection: () => {},
+    clearPendingDesktopSelection: () => {},
+    tryActivatePendingTouchSelection: () => false,
+    beginSelectionDrag: () => {},
+    noteScrollActivity: () => {},
+    getOverlayScrollbarLayout: () => null,
+    pointerToCanvasPx: () => ({ x: 0, y: 0 }),
+    setViewportScrollOffset: () => {},
+    normalizeSelectionCell: (cell) => cell,
+    positionToCell: () => ({ row: 0, col: 0 }),
+    scrollViewportByLines: () => {},
+    clearSelection: () => {},
+    updateCanvasCursor: () => {},
+    markNeedsRender: () => {},
+    updateLinkHover: () => {},
+    getGridState: () => ({ cols: 80, rows: 24, cellW: 10, cellH: 20 }),
+    getWasmReady: () => true,
+    getWasmHandle: () => 1,
+  });
+
+  const normalContextMenu = createMouseEvent();
+  canvas.emit("contextmenu", normalContextMenu.event as unknown as Event);
+  expect(normalContextMenu.prevented()).toBe(true);
+
+  const shiftContextMenu = createMouseEvent({ shiftKey: true });
+  canvas.emit("contextmenu", shiftContextMenu.event as unknown as Event);
+  expect(shiftContextMenu.prevented()).toBe(false);
 });

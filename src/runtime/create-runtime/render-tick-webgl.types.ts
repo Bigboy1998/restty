@@ -29,7 +29,6 @@ export type WebGLTickDeps = SharedTickDeps & {
   reportDebugText: (text: string) => void;
   updateGrid: () => void;
   getRenderState: () => RenderState | null;
-  clearKittyOverlay: () => void;
   resolveBlendFlags: (
     alphaMode: AlphaBlendingMode,
     backend: "webgl2",

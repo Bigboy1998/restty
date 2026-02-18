@@ -38,6 +38,7 @@ export function createPaneInteractions<TPane extends ResttyPaneDefinition>(optio
 
     if (options.contextMenu) {
       const onContextMenu = (event: MouseEvent) => {
+        if (event.defaultPrevented) return;
         if (options.contextMenu?.canOpen && !options.contextMenu.canOpen(event, pane)) {
           return;
         }
