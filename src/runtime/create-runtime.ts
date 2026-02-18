@@ -55,15 +55,16 @@ import {
 import { buildFontAtlasIfNeeded } from "./atlas-builder";
 import { normalizeFontSources } from "./font-sources";
 import * as bundledTextShaper from "text-shaper";
-import type { ResttyFontHintTarget, ResttyFontSource, ResttyApp, ResttyAppOptions } from "./types";
+import type {
+  ResttyFontHintTarget,
+  ResttyFontSource,
+  ResttyApp,
+  ResttyAppOptions,
+  ResttyFontResourceLease,
+} from "./types";
 import { getDefaultResttyAppSession } from "./session";
 import { createPtyOutputBufferController } from "./pty-output-buffer";
-import {
-  fitTextTailToWidth,
-  openLink,
-  sourceLabelFromUrl,
-  sourceBufferFromView,
-} from "./create-app-io-utils";
+import { fitTextTailToWidth, openLink } from "./create-app-io-utils";
 import { drawUnderlineStyle, drawStrikethrough, drawOverline } from "./text-decoration";
 import {
   DEFAULT_SYMBOL_CONSTRAINT,
@@ -111,16 +112,12 @@ import { createRuntimeLifecycleThemeSize } from "./create-runtime/lifecycle-them
 import { createRuntimeRenderTicks } from "./create-runtime/render-ticks";
 import { createRuntimeFontRuntimeHelpers } from "./create-runtime/font-runtime-helpers";
 import { createRuntimeReporting } from "./create-runtime/runtime-reporting";
+import { createResttyFontResourceStore } from "./font-resource-store";
 import {
   createRuntimeAppApi,
   type RuntimeAppApiRuntime,
   type RuntimeAppApiSharedState,
 } from "./create-runtime/runtime-app-api";
-import type {
-  LocalFontFaceData,
-  NavigatorWithLocalFontAccess,
-  GlobalWithLocalFontAccess,
-} from "./create-app-types";
 export { createResttyAppSession, getDefaultResttyAppSession } from "./session";
 export { createResttyPaneManager } from "../surface/panes/manager";
 export {
@@ -161,6 +158,28 @@ export type {
   CreateDefaultResttyPaneContextMenuItemsOptions,
 } from "../surface/panes-types";
 
+const FALLBACK_LOCAL_FONT_SOURCES: ResttyFontSource[] = [
+  {
+    type: "local",
+    matchers: [
+      "jetbrainsmono nerd font",
+      "jetbrains mono nerd font",
+      "fira code nerd font",
+      "fira code nerd",
+      "hack nerd font",
+      "meslo lgm nerd font",
+      "monaspace nerd font",
+      "nerd font mono",
+    ],
+    label: "fallback-nerd-font",
+  },
+  {
+    type: "local",
+    matchers: ["jetbrains mono"],
+    label: "fallback-jetbrains",
+  },
+];
+
 export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   const { canvas: canvasInput, imeInput: imeInputInput, elements, callbacks } = options;
   const beforeInputHook = options.beforeInput;
@@ -170,12 +189,12 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     beforeRenderOutputHook,
   });
   const session = options.session ?? getDefaultResttyAppSession();
+  const fontResourceStore = session.getFontResourceStore?.() ?? createResttyFontResourceStore();
   const textShaper = bundledTextShaper;
   if (!canvasInput) {
     throw new Error("createResttyApp requires a canvas element");
   }
   const {
-    Font,
     UnicodeBuffer,
     shape,
     glyphBufferToShapedGlyphs,
@@ -661,6 +680,7 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
 
   let fontPromise: Promise<void> | null = null;
   let fontError: Error | null = null;
+  let fontLease: ResttyFontResourceLease | null = null;
 
   setShaderStages(options.shaderStages ?? []);
 
@@ -771,195 +791,13 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     needsRender = true;
   }
 
-  async function tryFetchFontBuffer(url) {
-    try {
-      console.log("[font] Fetching:", url);
-      const response = await fetch(url);
-      if (response.ok) {
-        const buffer = await response.arrayBuffer();
-        console.log("[font] Loaded:", url, "size:", buffer.byteLength);
-        return buffer;
-      }
-      console.warn("[font] Fetch failed:", url, response.status, response.statusText);
-    } catch (err) {
-      console.warn("[font] Fetch error:", url, err);
-    }
-    return null;
+  function releaseFontLease() {
+    if (!fontLease) return;
+    fontLease.release();
+    fontLease = null;
   }
 
-  async function tryLocalFontBuffer(matchers, label = "local-font") {
-    if (typeof window === "undefined") return null;
-    const globalAccess = globalThis as GlobalWithLocalFontAccess;
-    const nav = (globalAccess.navigator ?? navigator) as NavigatorWithLocalFontAccess;
-    const queryLocalFonts =
-      typeof globalAccess.queryLocalFonts === "function"
-        ? globalAccess.queryLocalFonts.bind(globalAccess)
-        : typeof nav.queryLocalFonts === "function"
-          ? nav.queryLocalFonts.bind(nav)
-          : null;
-    if (!queryLocalFonts) return null;
-    const normalizedMatchers = matchers
-      .map((matcher: string) => matcher.toLowerCase())
-      .filter(Boolean);
-    if (!normalizedMatchers.length) return null;
-    const detectStyleHint = (value: string) => {
-      const text = value.toLowerCase();
-      let weight = 400;
-      if (/\b(thin|hairline)\b/.test(text)) weight = 100;
-      else if (/\b(extra[- ]?light|ultra[- ]?light)\b/.test(text)) weight = 200;
-      else if (/\blight\b/.test(text)) weight = 300;
-      else if (/\bmedium\b/.test(text)) weight = 500;
-      else if (/\b(semi[- ]?bold|demi[- ]?bold)\b/.test(text)) weight = 600;
-      else if (/\bbold\b/.test(text)) weight = 700;
-      else if (/\b(extra[- ]?bold|ultra[- ]?bold)\b/.test(text)) weight = 800;
-      else if (/\b(black|heavy)\b/.test(text)) weight = 900;
-      return {
-        bold: /\b(bold|semi[- ]?bold|demi[- ]?bold|extra[- ]?bold|black|heavy)\b/.test(text),
-        italic: /\b(italic|oblique)\b/.test(text),
-        regular: /\b(regular|book|roman|normal)\b/.test(text),
-        weight,
-      };
-    };
-    const sourceHint = detectStyleHint(`${label} ${normalizedMatchers.join(" ")}`);
-    const queryPermission = nav.permissions?.query;
-    if (queryPermission) {
-      try {
-        const status = await queryPermission({ name: "local-fonts" });
-        if (status?.state === "denied") return null;
-        console.log(`[font] local permission (${label}): ${status?.state ?? "unknown"}`);
-      } catch {}
-    }
-    try {
-      const fonts = await queryLocalFonts();
-      const matches = fonts.filter((font) => {
-        const name =
-          `${font.family ?? ""} ${font.fullName ?? ""} ${font.postscriptName ?? ""}`.toLowerCase();
-        return normalizedMatchers.some((matcher) => name.includes(matcher));
-      });
-      if (matches.length) {
-        const scoreMatch = (font: LocalFontFaceData) => {
-          const name =
-            `${font.family ?? ""} ${font.fullName ?? ""} ${font.postscriptName ?? ""}`.toLowerCase();
-          const hint = detectStyleHint(name);
-          let score = 0;
-          for (let i = 0; i < normalizedMatchers.length; i += 1) {
-            if (name.includes(normalizedMatchers[i])) score += 8;
-          }
-          if (sourceHint.bold || sourceHint.italic) {
-            score += sourceHint.bold === hint.bold ? 40 : -40;
-            score += sourceHint.italic === hint.italic ? 40 : -40;
-          } else {
-            score += !hint.bold && !hint.italic ? 60 : -30;
-          }
-          const targetWeight = sourceHint.bold ? 700 : 400;
-          score -= Math.abs((hint.weight ?? 400) - targetWeight) * 0.25;
-          if (!sourceHint.bold && hint.weight === 400) score += 12;
-          if (!sourceHint.bold && hint.weight < 350) score -= 12;
-          if (!sourceHint.bold && hint.weight > 650) score -= 8;
-          if (sourceHint.regular && !hint.bold && !hint.italic) score += 20;
-          return score;
-        };
-
-        let match = matches[0];
-        let bestScore = Number.NEGATIVE_INFINITY;
-        for (let i = 0; i < matches.length; i += 1) {
-          const candidate = matches[i];
-          const candidateScore = scoreMatch(candidate);
-          if (candidateScore > bestScore) {
-            bestScore = candidateScore;
-            match = candidate;
-          }
-        }
-
-        const matchedName =
-          `${match.family ?? ""} ${match.fullName ?? ""} ${match.postscriptName ?? ""}`.trim();
-        console.log(
-          `[font] local matched (${label}): ${matchedName || "unnamed"} score=${bestScore}`,
-        );
-        const blob = await match.blob();
-        return blob.arrayBuffer();
-      }
-      console.log(`[font] local no-match (${label}): ${normalizedMatchers.join(", ")}`);
-    } catch (err) {
-      console.warn("queryLocalFonts failed", err);
-    }
-    return null;
-  }
-
-  async function resolveFontSourceBuffer(source: ResttyFontSource): Promise<ArrayBuffer | null> {
-    if (source.type === "url") {
-      return tryFetchFontBuffer(source.url);
-    }
-    if (source.type === "buffer") {
-      const data = source.data;
-      if (data instanceof ArrayBuffer) return data;
-      if (ArrayBuffer.isView(data)) return sourceBufferFromView(data);
-      return null;
-    }
-    if (source.type === "local") {
-      const matchers: string[] = [];
-      for (let i = 0; i < source.matchers.length; i += 1) {
-        const matcher = source.matchers[i];
-        if (!matcher) continue;
-        matchers.push(matcher.toLowerCase());
-      }
-      if (!matchers.length) return null;
-      return tryLocalFontBuffer(matchers, source.label ?? source.matchers[0] ?? "local-font");
-    }
-    return null;
-  }
-
-  async function loadConfiguredFontBuffers() {
-    const loaded: Array<{ label: string; buffer: ArrayBuffer }> = [];
-    for (let i = 0; i < configuredFontSources.length; i += 1) {
-      const source = configuredFontSources[i];
-      const buffer = await resolveFontSourceBuffer(source);
-      if (!buffer) {
-        if (source.type === "local") {
-          const prefix = source.required
-            ? "required local font missing"
-            : "optional local font missing";
-          console.warn(`[font] ${prefix} (${source.matchers.join(", ")})`);
-        }
-        continue;
-      }
-      const label =
-        source.label ??
-        (source.type === "url"
-          ? sourceLabelFromUrl(source.url, i)
-          : source.type === "local"
-            ? (source.matchers[0] ?? `local-font-${i + 1}`)
-            : `font-buffer-${i + 1}`);
-      loaded.push({ label, buffer });
-    }
-    if (loaded.length) return loaded;
-
-    const nerdLocal = await tryLocalFontBuffer(
-      [
-        "jetbrainsmono nerd font",
-        "jetbrains mono nerd font",
-        "fira code nerd font",
-        "fira code nerd",
-        "hack nerd font",
-        "meslo lgm nerd font",
-        "monaspace nerd font",
-        "nerd font mono",
-      ],
-      "fallback-nerd-font",
-    );
-    if (nerdLocal) return [{ label: "local-nerd-font", buffer: nerdLocal }];
-
-    const local = await tryLocalFontBuffer(["jetbrains mono"], "fallback-jetbrains");
-    if (local) return [{ label: "local-jetbrains-mono", buffer: local }];
-
-    return [];
-  }
-
-  async function setFontSources(sources: ResttyFontSource[]) {
-    configuredFontSources = normalizeFontSources(sources, undefined);
-    fontPromise = null;
-    fontError = null;
-
+  function clearFontRuntimeState() {
     for (let i = 0; i < fontState.fonts.length; i += 1) {
       resetFontEntry(fontState.fonts[i]);
     }
@@ -967,10 +805,17 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
     fontState.fonts = [];
     fontState.fontSizePx = 0;
     fontState.fontPickCache.clear();
-
     if (activeState?.glyphAtlases) {
       activeState.glyphAtlases.clear();
     }
+  }
+
+  async function setFontSources(sources: ResttyFontSource[]) {
+    configuredFontSources = normalizeFontSources(sources, undefined);
+    fontPromise = null;
+    fontError = null;
+    releaseFontLease();
+    clearFontRuntimeState();
 
     await ensureFont();
     updateGrid();
@@ -1014,38 +859,24 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
   async function ensureFont() {
     if (fontState.font || fontPromise) return fontPromise;
     fontPromise = (async () => {
+      let acquiredLease: ResttyFontResourceLease | null = null;
       try {
-        const configuredBuffers = await loadConfiguredFontBuffers();
-        if (!configuredBuffers.length) {
+        acquiredLease = await fontResourceStore.acquire(configuredFontSources);
+        if (!acquiredLease.faces.length) {
+          acquiredLease.release();
+          acquiredLease = await fontResourceStore.acquire(FALLBACK_LOCAL_FONT_SOURCES);
+        }
+        if (!acquiredLease.faces.length) {
           throw new Error("Unable to load any configured font source.");
         }
+        releaseFontLease();
+        fontLease = acquiredLease;
+        acquiredLease = null;
+
         const entries: FontEntry[] = [];
-        for (let sourceIndex = 0; sourceIndex < configuredBuffers.length; sourceIndex += 1) {
-          const source = configuredBuffers[sourceIndex];
-          try {
-            const collection = Font.collection ? Font.collection(source.buffer) : null;
-            if (collection) {
-              const names = collection.names();
-              for (let infoIndex = 0; infoIndex < names.length; infoIndex += 1) {
-                const info = names[infoIndex];
-                try {
-                  const face = collection.get(info.index);
-                  const metadataLabel = info.fullName || info.family || info.postScriptName || "";
-                  const label = metadataLabel
-                    ? `${source.label} (${metadataLabel})`
-                    : `${source.label} ${info.index}`;
-                  entries.push(createFontEntry(face, label));
-                } catch (err) {
-                  console.warn(`font face load failed (${source.label} ${info.index})`, err);
-                }
-              }
-            } else {
-              const loadedFont = await Font.loadAsync(source.buffer);
-              entries.push(createFontEntry(loadedFont, source.label));
-            }
-          } catch (err) {
-            console.warn(`font load failed (${source.label})`, err);
-          }
+        for (let i = 0; i < fontLease.faces.length; i += 1) {
+          const face = fontLease.faces[i];
+          entries.push(createFontEntry(face.font, face.label));
         }
         if (!entries.length) {
           throw new Error("Unable to parse any loaded font source.");
@@ -1072,13 +903,28 @@ export function createResttyApp(options: ResttyAppOptions): ResttyApp {
         }
         updateGrid();
       } catch (err) {
-        fontError = err;
+        if (acquiredLease) {
+          acquiredLease.release();
+        } else {
+          releaseFontLease();
+        }
+        clearFontRuntimeState();
+        const error = err instanceof Error ? err : new Error(String(err));
+        fontError = error;
         console.error("font load error", err);
         log("font load failed");
       }
     })();
     return fontPromise;
   }
+
+  cleanupFns.push(() => {
+    releaseFontLease();
+    clearFontRuntimeState();
+    configuredFontSources = [];
+    fontPromise = null;
+    fontError = null;
+  });
 
   const { tickWebGPU, tickWebGL } = createRuntimeRenderTicks({
     isShaderStagesDirty,

@@ -1,5 +1,6 @@
 import { initWebGPUCore, type WebGPUCoreState } from "../renderer";
 import { loadResttyWasm, type ResttyWasm } from "../wasm";
+import { createResttyFontResourceStore } from "./font-resource-store";
 import type { ResttyAppSession, ResttyWasmLogListener } from "./types";
 
 /**
@@ -11,6 +12,7 @@ export function createResttyAppSession(): ResttyAppSession {
   let wasmPromise: Promise<ResttyWasm> | null = null;
   let webgpuCorePromise: Promise<WebGPUCoreState | null> | null = null;
   const wasmLogListeners = new Set<ResttyWasmLogListener>();
+  const fontResourceStore = createResttyFontResourceStore();
 
   const forwardWasmLog = (message: string) => {
     for (const listener of wasmLogListeners) {
@@ -31,6 +33,7 @@ export function createResttyAppSession(): ResttyAppSession {
       }
       return webgpuCorePromise;
     },
+    getFontResourceStore: () => fontResourceStore,
     addWasmLogListener: (listener: ResttyWasmLogListener) => {
       wasmLogListeners.add(listener);
     },

@@ -34,16 +34,14 @@ export function createMergedPaneAppOptions(
   deps: MergedPaneAppOptionsDeps,
 ): CreateResttyAppPaneManagerOptions["appOptions"] {
   return (context) => {
+    const paneId = context.id;
     const resolved =
       typeof deps.appOptions === "function" ? deps.appOptions(context) : (deps.appOptions ?? {});
     const resolvedBeforeInput = resolved.beforeInput;
     const resolvedBeforeRenderOutput = resolved.beforeRenderOutput;
     const resolvedCallbacks = resolved.callbacks;
-    const paneBaseStages = deps.shaderOps.normalizePaneShaderStages(
-      resolved.shaderStages,
-      context.id,
-    );
-    deps.shaderOps.setPaneBaseShaderStages(context.id, paneBaseStages);
+    const paneBaseStages = deps.shaderOps.normalizePaneShaderStages(resolved.shaderStages, paneId);
+    deps.shaderOps.setPaneBaseShaderStages(paneId, paneBaseStages);
 
     const fontSources = deps.getFontSources();
     return {
@@ -56,7 +54,7 @@ export function createMergedPaneAppOptions(
               ...resolvedCallbacks,
               onDesktopNotification: (notification) => {
                 resolvedCallbacks?.onDesktopNotification?.(notification);
-                deps.onDesktopNotification?.({ ...notification, paneId: context.id });
+                deps.onDesktopNotification?.({ ...notification, paneId });
               },
             }
           : resolvedCallbacks,
@@ -64,12 +62,12 @@ export function createMergedPaneAppOptions(
         const maybeUserText = resolvedBeforeInput?.({ text, source });
         if (maybeUserText === null) return null;
         const current = maybeUserText === undefined ? text : maybeUserText;
-        return deps.pluginOps.applyInputInterceptors(context.id, current, source);
+        return deps.pluginOps.applyInputInterceptors(paneId, current, source);
       },
       beforeRenderOutput: ({ text, source }) => {
         deps.runRenderHooks({
           phase: "before",
-          paneId: context.id,
+          paneId,
           text,
           source,
           dropped: false,
@@ -78,7 +76,7 @@ export function createMergedPaneAppOptions(
         if (maybeUserText === null) {
           deps.runRenderHooks({
             phase: "after",
-            paneId: context.id,
+            paneId,
             text,
             source,
             dropped: true,
@@ -86,10 +84,10 @@ export function createMergedPaneAppOptions(
           return null;
         }
         const current = maybeUserText === undefined ? text : maybeUserText;
-        const next = deps.pluginOps.applyOutputInterceptors(context.id, current, source);
+        const next = deps.pluginOps.applyOutputInterceptors(paneId, current, source);
         deps.runRenderHooks({
           phase: "after",
-          paneId: context.id,
+          paneId,
           text: next === null ? current : next,
           source,
           dropped: next === null,
