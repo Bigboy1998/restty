@@ -109,11 +109,11 @@ export type CreateResttyAppPaneManagerOptions = {
 function createImeInput(className: string): HTMLTextAreaElement {
   const imeInput = document.createElement("textarea");
   imeInput.className = className;
+  imeInput.tabIndex = -1;
   imeInput.autocapitalize = "off";
   imeInput.autocomplete = "off";
   imeInput.autocorrect = "off";
   imeInput.spellcheck = false;
-  imeInput.setAttribute("aria-hidden", "true");
   imeInput.style.position = "fixed";
   imeInput.style.left = "0";
   imeInput.style.top = "0";
